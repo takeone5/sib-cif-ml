@@ -23,7 +23,7 @@
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/sib-extract 074_S1_NPD_P2-NaxCayFe0.5Mn0.5O2.cif --json 074_S1_NPD.json -o features_stage1.json
+.venv/bin/sib-extract /path/to/input.cif --json /path/to/input.json -o features_stage1.json
 
 # 산화수 추정이 필요할 때만 별도 출력
 ```
@@ -54,5 +54,3 @@ python3 -m venv .venv
 이 경우 Wyckoff metadata를 사용하는 feature는 제한될 수 있습니다.
 
 결과 파일은 `features_all.csv`, `pearson_correlation.csv`, `pearson_heatmap.png`, `extraction_errors.csv`, `run_metadata.json`입니다. 피쳐 추출 결과에는 모든 피쳐가 포함되며, Pearson 상관계수와 heatmap에서는 [004], [005], [104], [105], [106]만 제외됩니다. 산화수 추정은 heatmap 대상에서 제외됩니다.
-
-예시 구조 `074_S1_NPD`의 실제 점유율 대입 과정과 계산 결과는 [EXAMPLE_074_S1_CALCULATION.md](EXAMPLE_074_S1_CALCULATION.md)에서 확인할 수 있습니다.
