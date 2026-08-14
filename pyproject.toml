@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sib-structure-features"
+version = "0.1.0"
+description = "Feature extraction for disordered SiB cathode Rietveld structures"
+requires-python = ">=3.10"
+dependencies = [
+    "pymatgen>=2024.10.29",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+]
+
+[project.scripts]
+sib-extract = "sib_features.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
