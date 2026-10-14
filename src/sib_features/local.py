@@ -1,4 +1,4 @@
-"""Local coordination features [201]-[228]."""
+"""Local coordination features [201], [206]-[208], [213]-[220], [225]-[228]."""
 
 from __future__ import annotations
 
@@ -22,6 +22,20 @@ def _stats(values: list[tuple[float, float]]) -> dict[str, float | None]:
     total = sum(w for _, w in pairs)
     if not pairs or total <= 0:
         return {k: None for k in ("mean", "harmonic", "geometric", "max", "min", "std", "variance", "skew")}
+    if len({v for v, _ in pairs}) == 1:
+        # Preserve exact equality after the requested distance quantization;
+        # do not reintroduce floating-point noise through repeated sums.
+        value = pairs[0][0]
+        return {
+            "mean": value,
+            "harmonic": value,
+            "geometric": value,
+            "max": value,
+            "min": value,
+            "std": 0.0,
+            "variance": 0.0,
+            "skew": 0.0,
+        }
     mean = sum(v * w for v, w in pairs) / total
     variance = sum(w * (v - mean) ** 2 for v, w in pairs) / total
     std = math.sqrt(variance)
@@ -83,7 +97,10 @@ def _bond_values(structure: Structure, kind: str) -> list[tuple[float, float]]:
         for _, oxygen_occupancy, distance in _oxygen_neighbors(structure, index):
             # Bond-length features describe geometry of a fully occupied
             # crystallographic center and O/F shell, without occupancy weights.
-            values.append((distance, 1.0))
+            # Report/compare distances at the requested 0.001 Angstrom
+            # resolution so floating-point noise cannot create false max/min
+            # differences in symmetry-equivalent bonds.
+            values.append((round(distance, 3), 1.0))
     return values
 
 
@@ -106,32 +123,73 @@ def _angle_values(structure: Structure, kind: str) -> list[tuple[float, float]]:
     return values
 
 
-def _merge(prefix: str, stats: dict[str, float | None], feature_numbers: tuple[int, ...]) -> dict[str, float | None]:
-    suffixes = (
-        "arithmetic_mean",
-        "harmonic_mean",
-        "geometric_mean",
-        "max",
-        "min",
-        "std",
-        "skew",
-    )
-    stat_names = ("mean", "harmonic", "geometric", "max", "min", "std", "skew")
-    return {
-        f"{number:03d}_{prefix}_{suffix}": stats[stat_name]
-        for number, suffix, stat_name in zip(feature_numbers, suffixes, stat_names)
-    }
+def _merge_selected(
+    prefix: str,
+    stats: dict[str, float | None],
+    definitions: tuple[tuple[int, str, str], ...],
+) -> dict[str, float | None]:
+    """Merge only the requested statistics, preserving their feature numbers."""
+    return {f"{number:03d}_{prefix}_{suffix}": stats[stat_name] for number, suffix, stat_name in definitions}
+
+
+def _round_stats(stats: dict[str, float | None], decimals: int) -> dict[str, float | None]:
+    """Round numeric statistics for feature outputs at their physical resolution."""
+    return {key: (None if value is None else round(float(value), decimals)) for key, value in stats.items()}
 
 
 def extract_local_features(structure: Structure) -> dict[str, float | None]:
     """Extract all currently specified local features."""
-    na_angles = _stats(_angle_values(structure, "Na"))
-    tm_angles = _stats(_angle_values(structure, "TM"))
-    na_bonds = _stats(_bond_values(structure, "Na"))
-    tm_bonds = _stats(_bond_values(structure, "TM"))
+    na_angles = _round_stats(_stats(_angle_values(structure, "Na")), 2)
+    tm_angles = _round_stats(_stats(_angle_values(structure, "TM")), 2)
+    na_bonds = _round_stats(_stats(_bond_values(structure, "Na")), 3)
+    tm_bonds = _round_stats(_stats(_bond_values(structure, "TM")), 3)
     result = {}
-    result.update(_merge("O_Na_O_angle_deg", na_angles, (201, 202, 203, 204, 205, 206, 207)))
-    result.update(_merge("O_TM_O_angle_deg", tm_angles, (208, 209, 210, 211, 212, 213, 214)))
-    result.update(_merge("Na_O_bond_length_A", na_bonds, (215, 217, 219, 221, 223, 225, 227)))
-    result.update(_merge("TM_O_bond_length_A", tm_bonds, (216, 218, 220, 222, 224, 226, 228)))
+    result.update(
+        _merge_selected(
+            "O_Na_O_angle_deg",
+            na_angles,
+            (
+                (201, "arithmetic_mean", "mean"),
+                (206, "std", "std"),
+                (207, "skew", "skew"),
+            ),
+        )
+    )
+    result.update(
+        _merge_selected(
+            "O_TM_O_angle_deg",
+            tm_angles,
+            (
+                (208, "arithmetic_mean", "mean"),
+                (213, "std", "std"),
+                (214, "skew", "skew"),
+            ),
+        )
+    )
+    result.update(
+        _merge_selected(
+            "Na_O_bond_length_A",
+            na_bonds,
+            (
+                (215, "arithmetic_mean", "mean"),
+                (217, "harmonic_mean", "harmonic"),
+                (219, "geometric_mean", "geometric"),
+                (225, "std", "std"),
+                (227, "skew", "skew"),
+            ),
+        )
+    )
+    result.update(
+        _merge_selected(
+            "TM_O_bond_length_A",
+            tm_bonds,
+            (
+                (216, "arithmetic_mean", "mean"),
+                (218, "harmonic_mean", "harmonic"),
+                (220, "geometric_mean", "geometric"),
+                (226, "std", "std"),
+                (228, "skew", "skew"),
+            ),
+        )
+    )
     return result

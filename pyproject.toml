@@ -13,6 +13,8 @@ dependencies = [
     "scipy>=1.10",
     "pandas>=2.0",
     "matplotlib>=3.8",
+    "matminer>=0.9.3",
+    "scikit-learn>=1.1",
 ]
 
 [project.scripts]

@@ -8,9 +8,9 @@ site and includes the unoccupied fraction as ``Vacancy`` where applicable.
 
 from __future__ import annotations
 
-import math
 import re
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,46 @@ from .local import extract_local_features
 from .fixed_charge import variable_tm_group_total_charge
 
 
-PERIODIC_SYMBOLS = [Element.from_Z(z).symbol for z in range(1, 119)]
+@lru_cache(maxsize=1)
+def _matminer_data():
+    from matminer.utils.data import CohesiveEnergyData, MagpieData
+
+    return MagpieData(), CohesiveEnergyData()
+
+
+def _matminer_property_moments(
+    fractions: dict[str, float],
+) -> dict[str, dict[str, float | None]]:
+    """Return TM-layer weighted means/stds for the requested Matminer data."""
+    magpie, cohesive = _matminer_data()
+    property_sources = {
+        "AtomicRadius": lambda symbol: magpie.get_elemental_property(Element(symbol), "AtomicRadius"),
+        "Electronegativity": lambda symbol: magpie.get_elemental_property(
+            Element(symbol), "Electronegativity"
+        ),
+        "NdValence": lambda symbol: magpie.get_elemental_property(Element(symbol), "NdValence"),
+        "CohesiveEnergy": lambda symbol: cohesive.get_elemental_property(symbol),
+    }
+    result: dict[str, dict[str, float | None]] = {}
+    for name, get_value in property_sources.items():
+        values = []
+        for symbol, fraction in fractions.items():
+            try:
+                values.append((float(get_value(symbol)), fraction))
+            except (KeyError, TypeError, ValueError):
+                continue
+        moments = weighted_moments(values)
+        if moments["mean"] is None:
+            moments["avg_dev"] = None
+        else:
+            total = sum(weight for _, weight in values)
+            moments["avg_dev"] = (
+                sum(weight * abs(value - moments["mean"]) for value, weight in values) / total
+                if total > 0
+                else None
+            )
+        result[name] = moments
+    return result
 
 
 class FeatureExtractor:
@@ -90,18 +129,6 @@ class FeatureExtractor:
         weights["Vacancy"] = max(0.0, 1.0 - occupied)
         return weights
 
-    @staticmethod
-    def _element_fractions(composition: dict[str, float]) -> dict[str, float]:
-        """Normalize occupied element amounts, excluding non-element entries."""
-        occupied = sum(value for symbol, value in composition.items() if symbol != "Vacancy")
-        if not occupied:
-            return {}
-        return {
-            symbol: value / occupied
-            for symbol, value in composition.items()
-            if symbol != "Vacancy" and value
-        }
-
     def _normalized_composition(self) -> dict[str, float]:
         comp = {str(k): float(v) for k, v in self.structure.composition.items()}
         oxygen = sum(comp.get(a, 0.0) for a in ANIONS)
@@ -127,15 +154,6 @@ class FeatureExtractor:
         total = sum(totals.values())
         return {s: v / total for s, v in totals.items()} if total else {}
 
-    def _atomic_property_moments(self, property_name: str) -> dict[str, float | None]:
-        fractions = self._tm_composition()
-        values = []
-        for symbol, fraction in fractions.items():
-            value = getattr(Element(symbol), property_name, None)
-            if value is not None:
-                values.append((float(value), fraction))
-        return weighted_moments(values)
-
     def extract(self) -> dict[str, Any]:
         rows = self._site_rows()
         na_rows = self._na_rows()
@@ -147,11 +165,17 @@ class FeatureExtractor:
                 if is_transition_metal(symbol) or is_alkali(symbol) or is_alkaline_earth(symbol):
                     tm_weights[symbol] += occ
         tm_fraction = self._tm_composition()
-        na_fraction = self._element_fractions(na_weights)
         comp = self._normalized_composition()
+        na_entropy = shannon_entropy(na_weights)
+        tm_entropy = shannon_entropy(tm_weights)
         sg_number = self.metadata.get("space_group", {}).get("number", self.structure.get_space_group_info()[1])
-        radius = self._atomic_property_moments("atomic_radius")
-        eneg = self._atomic_property_moments("X")
+        try:
+            is_prismatic = {160: 1, 166: 0, 194: 1}.get(int(sg_number))
+            is_2layer = {160: 0, 166: 0, 194: 1}.get(int(sg_number))
+        except (TypeError, ValueError):
+            is_prismatic = None
+            is_2layer = None
+        matminer_properties = _matminer_property_moments(tm_fraction)
         lattice = self.structure.lattice
         try:
             thickness = calculate_layer_thicknesses(self.structure, self.metadata)
@@ -162,28 +186,31 @@ class FeatureExtractor:
                 "106_O_Na_O_to_O_TM_O_ratio": None,
         }
         features: dict[str, Any] = {
-            "001_Na_layer_entropy": shannon_entropy(na_weights),
-            "002_TM_layer_entropy": shannon_entropy(tm_weights),
+            "001_Na_layer_entropy": round(na_entropy, 3),
+            "002_TM_layer_entropy": round(tm_entropy, 3),
             "003_Na_content_per_O2": comp.get("Na", 0.0),
-            "004_TM_layer_element_fractions": {s: tm_fraction.get(s, 0.0) for s in PERIODIC_SYMBOLS},
-            "005_Na_layer_element_fractions": {s: na_fraction.get(s, 0.0) for s in PERIODIC_SYMBOLS},
-            "006_Na_TM_entropy_product": shannon_entropy(na_weights) * shannon_entropy(tm_weights),
+            "006_Na_TM_entropy_sum": round(na_entropy + tm_entropy, 3),
             "007_Li_fraction_in_TM_layer": tm_fraction.get("Li", 0.0),
             "008_alkali_fraction_in_TM_layer": sum(tm_fraction.get(s, 0.0) for s in ALKALI),
             "009_Mg_fraction_in_TM_layer": tm_fraction.get("Mg", 0.0),
             "010_alkaline_earth_fraction_in_TM_layer": sum(tm_fraction.get(s, 0.0) for s in ALKALINE_EARTH),
-            "011_alkali_plus_alkaline_earth_fraction_in_TM_layer": sum(
-                tm_fraction.get(s, 0.0) for s in ALKALI | ALKALINE_EARTH
-            ),
-            "012_TM_atomic_radius_mean": radius["mean"],
-            "013_TM_atomic_radius_std": radius["std"],
-            "014_TM_electronegativity_mean": eneg["mean"],
-            "015_TM_electronegativity_std": eneg["std"],
             "016_Ni_Co_Mn_Fe_required_charge": variable_tm_group_total_charge(self.structure),
             "101_space_group_number": sg_number,
             "102_cell_c_over_a": lattice.c / lattice.a,
             "103_cell_volume_A3": lattice.volume,
         } 
         features.update(thickness)
+        features.update(
+            {
+                "107_AtomicRadius_mean": matminer_properties["AtomicRadius"]["mean"],
+                "108_AtomicRadius_avg_dev": matminer_properties["AtomicRadius"]["avg_dev"],
+                "109_Electronegativity_mean": matminer_properties["Electronegativity"]["mean"],
+                "110_Electronegativity_avg_dev": matminer_properties["Electronegativity"]["avg_dev"],
+                "111_NdValence": matminer_properties["NdValence"]["mean"],
+                "112_CohesiveEnergy": matminer_properties["CohesiveEnergy"]["mean"],
+                "113_is_Prismatic": is_prismatic,
+                "114_is_2Layer": is_2layer,
+            }
+        )
         features.update(extract_local_features(self.structure))
         return features

@@ -10,12 +10,13 @@ from pymatgen.core import Element
 ALKALI = {"Li", "Na", "K", "Rb", "Cs", "Fr"}
 ALKALINE_EARTH = {"Be", "Mg", "Ca", "Sr", "Ba", "Ra"}
 ANIONS = {"O", "F"}
+LANTHANIDES = {"La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu"}
 
 
 def is_transition_metal(symbol: str) -> bool:
-    """Use pymatgen's periodic-table classification, excluding lanthanides."""
+    """Return whether an element is a d-block transition metal or lanthanide TM-like center."""
     try:
-        return bool(Element(symbol).is_transition_metal)
+        return bool(Element(symbol).is_transition_metal) or symbol in LANTHANIDES
     except (ValueError, TypeError):
         return False
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract features from a CIF directory and plot a Pearson heatmap.
+"""Extract Fold 1 train features and plot a Spearman heatmap.
 
 This script is intentionally sequential. The local-structure extractor is
 CPU-only and the default workflow avoids multiprocessing memory spikes.
@@ -24,13 +24,9 @@ from sib_features import FeatureExtractor
 
 
 SAMPLE_ID_RE = re.compile(r"^(?P<id>\d+_S\d+(?:_\d+)?)")
-DEFAULT_HEATMAP_EXCLUDED_PREFIXES = (
-    "004_TM_layer_element_fractions",
-    "005_Na_layer_element_fractions",
-    "104_O_TM_O_distance_A",
-    "105_O_Na_O_distance_A",
-    "106_O_Na_O_to_O_TM_O_ratio",
-)
+DEFAULT_DATA_ROOT = Path("split_data_v1/fold_1/train")
+DEFAULT_OUTPUT_DIR = Path("correlation_output/fold_1_train_spearman")
+EXCLUDED_HEATMAP_FEATURE_IDS = {101, 102, 103, 104, 105, 106}
 
 
 def sample_id(path: Path) -> str | None:
@@ -106,39 +102,43 @@ def plot_heatmap(correlation: pd.DataFrame, output: Path, figsize: tuple[float, 
     image = axis.imshow(correlation.to_numpy(), cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
     axis.set_xticks(range(len(correlation.columns)), labels=correlation.columns, rotation=90, fontsize=5)
     axis.set_yticks(range(len(correlation.index)), labels=correlation.index, fontsize=5)
-    axis.set_title("Pearson correlation of extracted features")
-    figure.colorbar(image, ax=axis, label="Pearson r", fraction=0.046, pad=0.04)
+    axis.set_title("Spearman correlation of Fold 1 train features")
+    figure.colorbar(image, ax=axis, label="Spearman ρ", fraction=0.046, pad=0.04)
     figure.tight_layout()
     figure.savefig(output, dpi=220, bbox_inches="tight")
     plt.close(figure)
 
 
-def select_heatmap_features(table: pd.DataFrame, exclude_element_vector: bool = False) -> pd.DataFrame:
-    """Select numeric features for correlation without changing extracted data."""
+def select_heatmap_features(table: pd.DataFrame) -> pd.DataFrame:
+    """Select composition features and 113-114 while excluding 101-106."""
     numeric = table.select_dtypes(include="number")
-    excluded_prefixes = DEFAULT_HEATMAP_EXCLUDED_PREFIXES
-    if exclude_element_vector:
-        excluded_prefixes = excluded_prefixes + ("004_TM_layer_element_fractions__", "005_Na_layer_element_fractions__")
-    keep = ~numeric.columns.to_series().apply(
-        lambda column: any(column == prefix or column.startswith(prefix + "__") for prefix in excluded_prefixes)
-    )
-    numeric = numeric.loc[:, keep.to_numpy()]
+    feature_columns = []
+    for column in numeric.columns:
+        match = re.match(r"^(\d{3})_", str(column))
+        if match and 1 <= int(match.group(1)) <= 114 and int(match.group(1)) not in EXCLUDED_HEATMAP_FEATURE_IDS:
+            feature_columns.append(column)
+    numeric = numeric.loc[:, feature_columns]
     numeric = numeric.dropna(axis=1, how="all")
     return numeric.loc[:, numeric.nunique(dropna=True) > 1]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extract CIF features and create a Pearson correlation heatmap.")
-    parser.add_argument("data_root", type=Path, help="Directory recursively containing CIF files.")
+    parser = argparse.ArgumentParser(description="Extract Fold 1 train CIF features and create a Spearman heatmap.")
+    parser.add_argument(
+        "data_root",
+        type=Path,
+        nargs="?",
+        default=DEFAULT_DATA_ROOT,
+        help="Directory recursively containing CIF files (default: Fold 1 train set).",
+    )
     parser.add_argument(
         "--json-root",
         type=Path,
         help="Directory recursively containing JSON metadata; defaults to data_root.",
     )
-    parser.add_argument("-o", "--output-dir", type=Path, default=Path("correlation_output"))
+    parser.add_argument("-o", "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--limit", type=int, help="Process only the first N sorted CIF files for a pilot run.")
     parser.add_argument("--min-periods", type=int, default=3, help="Minimum paired samples for each correlation.")
-    parser.add_argument("--exclude-element-vector", action="store_true", help="Also exclude expanded element-fraction columns from the heatmap (already excluded by default).")
     parser.add_argument("--fig-width", type=float, default=28.0)
     parser.add_argument("--fig-height", type=float, default=28.0)
     args = parser.parse_args()
@@ -158,10 +158,10 @@ def main() -> None:
     table.to_csv(args.output_dir / "features_all.csv", index=False)
     errors.to_csv(args.output_dir / "extraction_errors.csv", index=False)
 
-    numeric = select_heatmap_features(table, args.exclude_element_vector)
-    correlation = numeric.corr(method="pearson", min_periods=args.min_periods)
-    correlation.to_csv(args.output_dir / "pearson_correlation.csv")
-    plot_heatmap(correlation, args.output_dir / "pearson_heatmap.png", (args.fig_width, args.fig_height))
+    numeric = select_heatmap_features(table)
+    correlation = numeric.corr(method="spearman", min_periods=args.min_periods)
+    correlation.to_csv(args.output_dir / "spearman_correlation.csv")
+    plot_heatmap(correlation, args.output_dir / "spearman_heatmap.png", (args.fig_width, args.fig_height))
     metadata = {
         "data_root": str(args.data_root),
         "json_root": str(args.json_root or args.data_root),
@@ -169,8 +169,9 @@ def main() -> None:
         "successful_rows": int(len(table)),
         "error_rows": int(len(errors)),
         "numeric_columns_in_heatmap": int(len(numeric.columns)),
-        "excluded_feature_prefixes": list(DEFAULT_HEATMAP_EXCLUDED_PREFIXES),
-        "oxidation_states_included": False,
+        "correlation_method": "spearman",
+        "feature_id_range": "001-112, 113, 114",
+        "excluded_feature_ids": sorted(EXCLUDED_HEATMAP_FEATURE_IDS),
         "min_periods": args.min_periods,
     }
     (args.output_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
