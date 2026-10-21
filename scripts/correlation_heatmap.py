@@ -99,7 +99,7 @@ def extract_dataset(
             except Exception as exc:  # Keep one malformed structure from stopping a batch.
                 status = "FAIL"
                 errors.append({"source_cif": str(cif_path), "error": repr(exc)})
-            print(f"\r[{number}/{total}] {status}", end="", flush=True)
+            print(f"\r[{number}/{total}] {cif_path.name} ; {status}", end="", flush=True)
     if total:
         print()
     return pd.DataFrame(rows), pd.DataFrame(errors, columns=["source_cif", "error"])
@@ -113,12 +113,27 @@ def plot_heatmap(correlation: pd.DataFrame, output: Path, figsize: tuple[float, 
     cmap = plt.get_cmap("RdBu_r").copy()
     cmap.set_bad("white")
     image = axis.imshow(masked_values, cmap=cmap, vmin=-1, vmax=1, aspect="auto", interpolation="none")
-    axis.set_xticks(range(len(correlation.columns)), labels=correlation.columns, rotation=90, fontsize=8)
-    axis.set_yticks(range(len(correlation.index)), labels=correlation.index, fontsize=8)
-    axis.tick_params(axis="both", which="major", pad=2)
+
+    # Scale labels to the available cell size.  This keeps labels prominent for
+    # small matrices while preventing adjacent row labels from colliding when
+    # the feature count grows.
+    row_count = max(len(correlation.index), 1)
+    col_count = max(len(correlation.columns), 1)
+    row_cell_points = figsize[1] * 72.0 / row_count
+    col_cell_points = figsize[0] * 72.0 / col_count
+    label_fontsize = min(
+        16.0,
+        max(8.0, row_cell_points * 0.72),
+        max(8.0, col_cell_points * 0.34),
+    )
+    axis.set_xticks(range(col_count), labels=correlation.columns, rotation=90, fontsize=label_fontsize)
+    axis.set_yticks(range(row_count), labels=correlation.index, fontsize=label_fontsize)
+    axis.tick_params(axis="both", which="major", pad=3)
     axis.set_title("Spearman correlation of Fold 1 train features", fontsize=14, pad=14)
     figure.colorbar(image, ax=axis, label="Spearman ρ", fraction=0.046, pad=0.04)
-    figure.tight_layout()
+    # Let tight_layout reserve the larger tick-label margins rather than
+    # allowing labels to be clipped or overlap the colorbar/title.
+    figure.tight_layout(pad=1.2)
     figure.savefig(output, dpi=220, bbox_inches="tight")
     plt.close(figure)
 
@@ -168,12 +183,17 @@ def plot_interactive_heatmap(correlation: pd.DataFrame, output: Path) -> bool:
     cutoffs = np.arange(0.0, 1.01, 0.05)
     figure.update_layout(
         title="Interactive Spearman correlation heatmap",
-        xaxis={"tickangle": 90},
+        # The slider is deliberately placed well below the rotated x labels.
+        # The extra bottom margin is needed in both browser and notebook output.
+        margin={"l": 170, "r": 40, "t": 90, "b": 250},
+        xaxis={"tickangle": 90, "automargin": True, "ticklabelstandoff": 10},
         yaxis={"autorange": "reversed"},
         sliders=[
             {
                 "active": 0,
                 "currentvalue": {"prefix": "Minimum |ρ|: "},
+                "y": -0.30,
+                "pad": {"t": 18},
                 "steps": [
                     {
                         "label": f"{cutoff:.2f}",

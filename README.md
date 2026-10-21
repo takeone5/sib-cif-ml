@@ -57,6 +57,42 @@ python3 -m venv .venv
 
 결과 파일은 `features_all.csv`, `spearman_correlation.csv`, `spearman_heatmap.png`, `extraction_errors.csv`, `run_metadata.json`입니다. Spearman 상관계수와 heatmap에서는 [101]–[106] 및 local feature [201] 이상을 제외합니다.
 
+## LightGBM 데모 모델
+
+기존 `split_data_v1/summary.json`과 `fold_membership.csv`의 5-Fold 분할을 그대로 사용해
+106번 피쳐(`106_O_Na_O_to_O_TM_O_ratio`)를 예측합니다. 먼저 전체 305개 샘플에 대해
+feature CSV를 생성한 뒤 모델을 실행합니다. `--data-root`는 feature CSV 생성에 사용한 CIF 루트입니다.
+
+```bash
+# 전체 데이터에서 features_all.csv 생성
+.venv/bin/python scripts/correlation_heatmap.py /path/to/all_cif_root \
+  --json-root /path/to/all_json_root \
+  -o correlation_output/all_features
+
+# 고정 파라미터 LightGBM 5-Fold 데모 실행
+.venv/bin/python scripts/train_lightgbm_demo.py \
+  --features correlation_output/all_features/features_all.csv \
+  --data-root /path/to/all_cif_root \
+  --split-root split_data_v1 \
+  -o ml_output/lightgbm_demo
+```
+
+사용 피쳐는 지정된 12개이며, 하이퍼파라미터 튜닝 없이 `max_depth=4`, `num_leaves=10`,
+`min_child_samples=4`, `learning_rate=0.03`, `colsample_bytree=0.8`을 사용합니다.
+`n_estimators`는 데모 실행을 위해 100으로 고정합니다.
+
+CLI와 `train.log`에는 fold별 및 평균 train/test R², 평균 test RMSE, 총 실행 시간이 기록됩니다.
+추가 결과는 `fold_metrics.csv`, `test_predictions.csv`, `feature_importance.csv`, `metrics.json`으로 저장됩니다.
+
+학습 결과를 시각화하려면 다음 명령을 실행합니다.
+
+```bash
+.venv/bin/python scripts/plot_lightgbm_results.py ml_output/lightgbm_demo
+```
+
+다음 이미지가 생성됩니다: `actual_vs_predicted.png`(실제값-예측값),
+`fold_metrics.png`(fold별 R²/RMSE), `feature_importance.png`(fold 평균 피쳐 중요도).
+
 ## Google Colab에서 GitHub 코드와 Google Drive 데이터 연결
 
 `split_data_v1/`은 GitHub에 올리지 않고 Google Drive에 보관합니다. Colab에서 GitHub 저장소를 clone한 뒤 Google Drive를 mount하고, Drive의 Fold 1 train 디렉토리를 입력 경로로 지정합니다.
@@ -81,3 +117,32 @@ Google Drive의 실제 경로가 `MyDrive/split_data_v1/fold_1/train`인 경우 
 ```
 
 이 heatmap은 Fold 1 train set만 사용하며, `101`–`106`과 local feature `201` 이상은 상관계수 계산에서 제외합니다.
+
+생성이 끝난 뒤 Colab 셀에서 정적 PNG와 인터랙티브 HTML을 각각 표시할 수 있습니다.
+HTML은 cutoff slider를 포함하므로, 브라우저에서 별도 파일을 열지 않고도 아래 셀에서 바로 조작할 수 있습니다.
+
+```python
+from IPython.display import Image, HTML, display
+from pathlib import Path
+
+output_dir = Path("/content/drive/MyDrive/correlation_output")
+
+# 정적 PNG 히트맵
+display(Image(filename=str(output_dir / "spearman_heatmap.png")))
+
+# cutoff slider가 있는 인터랙티브 HTML 히트맵
+html = (output_dir / "spearman_heatmap.html").read_text(encoding="utf-8")
+display(HTML(html))
+```
+
+인터랙티브 HTML을 Colab 셀 안에서 더 넓게 표시하려면 다음처럼 iframe으로 불러올 수도 있습니다.
+
+```python
+from IPython.display import IFrame, display
+
+display(IFrame(
+    src="/content/drive/MyDrive/correlation_output/spearman_heatmap.html",
+    width="100%",
+    height=1200,
+))
+```

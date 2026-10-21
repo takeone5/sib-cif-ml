@@ -14,6 +14,7 @@ dependencies = [
     "pandas>=2.0",
     "matplotlib>=3.8",
     "matminer>=0.9.3",
+    "lightgbm>=4.0",
     "scikit-learn>=1.1",
 ]
 

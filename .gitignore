@@ -5,3 +5,4 @@ __pycache__/
 *.egg-info/
 origin_data_v4/
 split_data_v1/
+/summary.json
