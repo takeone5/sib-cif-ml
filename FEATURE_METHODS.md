@@ -42,22 +42,9 @@ TM site의 전이금속, 알칼리금속, 알칼리토금속 점유율 분포에
 
 구조 전체 Na 함량을 O=2 기준으로 정규화한 값입니다. 예를 들어 `Na0.84...O4`는 Na 함량 `0.42`가 됩니다.
 
-### [006] `006_Na_TM_entropy_sum`
-
-`feature_001 + feature_002`입니다. 엔트로피 관련 출력값([001], [002], [006])은
-소수점 이하 셋째 자리까지 반올림합니다. 합산은 반올림 전 엔트로피 값으로 수행합니다.
-
-### [007] `007_Li_fraction_in_TM_layer`
-
-TM layer 조성 벡터의 Li 분율입니다.
-
 ### [008] `008_alkali_fraction_in_TM_layer`
 
 TM layer 조성 벡터에서 Li, Na, K, Rb, Cs, Fr 분율의 합입니다.
-
-### [009] `009_Mg_fraction_in_TM_layer`
-
-TM layer 조성 벡터의 Mg 분율입니다.
 
 ### [010] `010_alkaline_earth_fraction_in_TM_layer`
 

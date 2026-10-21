@@ -11,6 +11,7 @@ import argparse
 import json
 import re
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,11 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from sib_features import FeatureExtractor
+from sib_features.io import warning_log
 
 
 SAMPLE_ID_RE = re.compile(r"^(?P<id>\d+_S\d+(?:_\d+)?)")
@@ -75,6 +78,7 @@ def extract_dataset(
     root: Path,
     limit: int | None = None,
     json_root: Path | None = None,
+    warning_log_path: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     cif_paths = sorted(root.rglob("*.cif"))
     if limit is not None:
@@ -83,30 +87,118 @@ def extract_dataset(
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     total = len(cif_paths)
-    for number, cif_path in enumerate(cif_paths, start=1):
-        json_path = match_json(cif_path, json_index)
-        try:
-            result = FeatureExtractor.from_files(cif_path, json_path).extract()
-            row = {"source_cif": str(cif_path), "source_json": str(json_path) if json_path else ""}
-            row.update(flatten_numeric(result))
-            rows.append(row)
-        except Exception as exc:  # Keep one malformed structure from stopping a batch.
-            errors.append({"source_cif": str(cif_path), "error": repr(exc)})
-        if number == 1 or number % 25 == 0 or number == total:
-            print(f"[{number}/{total}] processed; success={len(rows)}, errors={len(errors)}", flush=True)
+    with warning_log(warning_log_path):
+        for number, cif_path in enumerate(cif_paths, start=1):
+            json_path = match_json(cif_path, json_index)
+            status = "OK"
+            try:
+                result = FeatureExtractor.from_files(cif_path, json_path).extract()
+                row = {"source_cif": str(cif_path), "source_json": str(json_path) if json_path else ""}
+                row.update(flatten_numeric(result))
+                rows.append(row)
+            except Exception as exc:  # Keep one malformed structure from stopping a batch.
+                status = "FAIL"
+                errors.append({"source_cif": str(cif_path), "error": repr(exc)})
+            print(f"\r[{number}/{total}] {status}", end="", flush=True)
+    if total:
+        print()
     return pd.DataFrame(rows), pd.DataFrame(errors, columns=["source_cif", "error"])
 
 
 def plot_heatmap(correlation: pd.DataFrame, output: Path, figsize: tuple[float, float]) -> None:
     figure, axis = plt.subplots(figsize=figsize)
-    image = axis.imshow(correlation.to_numpy(), cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
-    axis.set_xticks(range(len(correlation.columns)), labels=correlation.columns, rotation=90, fontsize=5)
-    axis.set_yticks(range(len(correlation.index)), labels=correlation.index, fontsize=5)
-    axis.set_title("Spearman correlation of Fold 1 train features")
+    values = correlation.to_numpy(dtype=float)
+    lower_triangle = np.tril(np.ones(values.shape, dtype=bool), k=-1)
+    masked_values = np.ma.masked_where(lower_triangle | np.isnan(values), values)
+    cmap = plt.get_cmap("RdBu_r").copy()
+    cmap.set_bad("white")
+    image = axis.imshow(masked_values, cmap=cmap, vmin=-1, vmax=1, aspect="auto", interpolation="none")
+    axis.set_xticks(range(len(correlation.columns)), labels=correlation.columns, rotation=90, fontsize=8)
+    axis.set_yticks(range(len(correlation.index)), labels=correlation.index, fontsize=8)
+    axis.tick_params(axis="both", which="major", pad=2)
+    axis.set_title("Spearman correlation of Fold 1 train features", fontsize=14, pad=14)
     figure.colorbar(image, ax=axis, label="Spearman ρ", fraction=0.046, pad=0.04)
     figure.tight_layout()
     figure.savefig(output, dpi=220, bbox_inches="tight")
     plt.close(figure)
+
+
+def plot_interactive_heatmap(correlation: pd.DataFrame, output: Path) -> bool:
+    """Save an optional Plotly heatmap with hover values and an abs(ρ) slider."""
+    try:
+        import plotly.graph_objects as go
+    except ImportError:
+        warnings.warn(
+            "Plotly is not installed; skipping the interactive heatmap. "
+            "The static PNG was still generated.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return False
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    values = correlation.to_numpy(dtype=float)
+    lower_triangle = np.tril(np.ones(values.shape, dtype=bool), k=-1)
+    values[lower_triangle] = np.nan
+    labels = [str(label) for label in correlation.columns]
+
+    def values_for_cutoff(cutoff: float) -> list[list[float | None]]:
+        masked = values.copy()
+        masked[np.abs(masked) < cutoff] = np.nan
+        return [
+            [None if np.isnan(value) else float(value) for value in row]
+            for row in masked
+        ]
+
+    initial_cutoff = 0.0
+    figure = go.Figure(
+        data=[
+            go.Heatmap(
+                z=values_for_cutoff(initial_cutoff),
+                x=labels,
+                y=labels,
+                zmin=-1,
+                zmax=1,
+                colorscale="RdBu",
+                colorbar={"title": "Spearman ρ"},
+                hovertemplate="x: %{x}<br>y: %{y}<br>ρ: %{z:.3f}<extra></extra>",
+            )
+        ]
+    )
+    cutoffs = np.arange(0.0, 1.01, 0.05)
+    figure.update_layout(
+        title="Interactive Spearman correlation heatmap",
+        xaxis={"tickangle": 90},
+        yaxis={"autorange": "reversed"},
+        sliders=[
+            {
+                "active": 0,
+                "currentvalue": {"prefix": "Minimum |ρ|: "},
+                "steps": [
+                    {
+                        "label": f"{cutoff:.2f}",
+                        "method": "restyle",
+                        "args": [{"z": [values_for_cutoff(float(cutoff))]}],
+                    }
+                    for cutoff in cutoffs
+                ],
+            }
+        ],
+    )
+    figure.write_html(output, include_plotlyjs=True)
+
+    # In Colab/Jupyter, display the same interactive figure inline as well.
+    try:
+        get_ipython  # type: ignore[name-defined]
+    except NameError:
+        return True
+    try:
+        from IPython.display import display
+
+        display(figure)
+    except Exception as exc:
+        warnings.warn(f"Could not display the interactive heatmap inline: {exc}", UserWarning, stacklevel=2)
+    return True
 
 
 def select_heatmap_features(table: pd.DataFrame) -> pd.DataFrame:
@@ -137,6 +229,16 @@ def main() -> None:
         help="Directory recursively containing JSON metadata; defaults to data_root.",
     )
     parser.add_argument("-o", "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--interactive-output",
+        type=Path,
+        help="Interactive Plotly HTML path (default: <output-dir>/spearman_heatmap.html).",
+    )
+    parser.add_argument(
+        "--warning-log",
+        type=Path,
+        help="Warning log path (default: <output-dir>/warnings.log).",
+    )
     parser.add_argument("--limit", type=int, help="Process only the first N sorted CIF files for a pilot run.")
     parser.add_argument("--min-periods", type=int, default=3, help="Minimum paired samples for each correlation.")
     parser.add_argument("--fig-width", type=float, default=28.0)
@@ -150,7 +252,8 @@ def main() -> None:
         parser.error("--limit must be positive")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    table, errors = extract_dataset(args.data_root, args.limit, args.json_root)
+    warning_log_path = args.warning_log or args.output_dir / "warnings.log"
+    table, errors = extract_dataset(args.data_root, args.limit, args.json_root, warning_log_path)
     if table.empty:
         print("No CIF produced a feature row.", file=sys.stderr)
         errors.to_csv(args.output_dir / "extraction_errors.csv", index=False)
@@ -162,12 +265,25 @@ def main() -> None:
     correlation = numeric.corr(method="spearman", min_periods=args.min_periods)
     correlation.to_csv(args.output_dir / "spearman_correlation.csv")
     plot_heatmap(correlation, args.output_dir / "spearman_heatmap.png", (args.fig_width, args.fig_height))
+    interactive_output = args.interactive_output or args.output_dir / "spearman_heatmap.html"
+    with warning_log(warning_log_path):
+        try:
+            interactive_created = plot_interactive_heatmap(correlation, interactive_output)
+        except Exception as exc:
+            warnings.warn(
+                f"Interactive heatmap could not be created: {exc}. The static PNG was still generated.",
+                UserWarning,
+                stacklevel=2,
+            )
+            interactive_created = False
     metadata = {
         "data_root": str(args.data_root),
         "json_root": str(args.json_root or args.data_root),
         "cif_count_requested": args.limit,
         "successful_rows": int(len(table)),
         "error_rows": int(len(errors)),
+        "warning_log": str(warning_log_path),
+        "interactive_heatmap": str(interactive_output) if interactive_created else None,
         "numeric_columns_in_heatmap": int(len(numeric.columns)),
         "correlation_method": "spearman",
         "feature_id_range": "001-112, 113, 114",

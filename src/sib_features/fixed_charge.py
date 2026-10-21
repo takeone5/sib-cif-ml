@@ -33,7 +33,13 @@ FIXED_OXIDATION_STATES = {
 
 
 def _normalized_composition(structure: Structure) -> dict[str, float]:
-    composition = {str(element): float(amount) for element, amount in structure.composition.items()}
+    # ``Structure`` may retain oxidation states from CIF type symbols such as
+    # ``O2-`` and ``Fe3+``.  The fixed-charge tables are keyed by bare element
+    # symbols, so use ``symbol`` rather than ``str(specie)`` here.
+    composition: dict[str, float] = {}
+    for specie, amount in structure.composition.items():
+        symbol = specie.symbol
+        composition[symbol] = composition.get(symbol, 0.0) + float(amount)
     anion_amount = sum(composition.get(symbol, 0.0) for symbol in ANIONS)
     if anion_amount <= 0:
         raise ValueError("Fixed-charge feature requires an O/F anion sublattice")

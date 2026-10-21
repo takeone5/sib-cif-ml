@@ -9,6 +9,7 @@ site and includes the unoccupied fraction as ``Vacancy`` where applicable.
 from __future__ import annotations
 
 import re
+import warnings
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -76,17 +77,46 @@ def _matminer_property_moments(
 class FeatureExtractor:
     """Extract composition and global features from one JSON/CIF pair."""
 
-    def __init__(self, structure: Structure, metadata: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        structure: Structure,
+        metadata: dict[str, Any] | None = None,
+        cif_space_group_number: int | None = None,
+    ):
         self.structure = structure
         self.metadata = metadata or {}
         self.json_sites = self.metadata.get("sites", [])
+        self.cif_space_group_number = cif_space_group_number
 
     @classmethod
     def from_files(cls, cif_path: str | Path, json_path: str | Path | None = None):
-        from .io import load_json
+        from .io import load_cif_space_group_number, load_json
 
         metadata = load_json(json_path) if json_path else {}
-        return cls(Structure.from_file(str(cif_path)), metadata)
+        return cls(
+            Structure.from_file(str(cif_path)),
+            metadata,
+            load_cif_space_group_number(cif_path),
+        )
+
+    def _space_group_number(self) -> int:
+        """Use declared metadata before falling back to symmetry analysis."""
+        json_number = self.metadata.get("space_group", {}).get("number")
+        cif_number = self.cif_space_group_number
+
+        if json_number is not None:
+            json_number = int(json_number)
+            if cif_number is not None and json_number != cif_number:
+                warnings.warn(
+                    f"JSON space-group number {json_number} differs from CIF header "
+                    f"number {cif_number}; using JSON value.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            return json_number
+        if cif_number is not None:
+            return cif_number
+        return int(self.structure.get_space_group_info()[1])
 
     def _site_rows(self) -> list[dict[str, Any]]:
         """Return JSON rows, or CIF sites with an inferred row label."""
@@ -168,7 +198,7 @@ class FeatureExtractor:
         comp = self._normalized_composition()
         na_entropy = shannon_entropy(na_weights)
         tm_entropy = shannon_entropy(tm_weights)
-        sg_number = self.metadata.get("space_group", {}).get("number", self.structure.get_space_group_info()[1])
+        sg_number = self._space_group_number()
         try:
             is_prismatic = {160: 1, 166: 0, 194: 1}.get(int(sg_number))
             is_2layer = {160: 0, 166: 0, 194: 1}.get(int(sg_number))
@@ -189,10 +219,7 @@ class FeatureExtractor:
             "001_Na_layer_entropy": round(na_entropy, 3),
             "002_TM_layer_entropy": round(tm_entropy, 3),
             "003_Na_content_per_O2": comp.get("Na", 0.0),
-            "006_Na_TM_entropy_sum": round(na_entropy + tm_entropy, 3),
-            "007_Li_fraction_in_TM_layer": tm_fraction.get("Li", 0.0),
             "008_alkali_fraction_in_TM_layer": sum(tm_fraction.get(s, 0.0) for s in ALKALI),
-            "009_Mg_fraction_in_TM_layer": tm_fraction.get("Mg", 0.0),
             "010_alkaline_earth_fraction_in_TM_layer": sum(tm_fraction.get(s, 0.0) for s in ALKALINE_EARTH),
             "016_Ni_Co_Mn_Fe_required_charge": variable_tm_group_total_charge(self.structure),
             "101_space_group_number": sg_number,
