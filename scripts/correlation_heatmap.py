@@ -37,9 +37,15 @@ def sample_id(path: Path) -> str | None:
     return match.group("id") if match else None
 
 
+def find_files(root: Path, suffix: str) -> list[Path]:
+    """Find files under root recursively, ignoring extension case."""
+    normalized_suffix = suffix.lower()
+    return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() == normalized_suffix)
+
+
 def make_json_index(root: Path) -> dict[str, list[Path]]:
     index: dict[str, list[Path]] = {}
-    for path in root.rglob("*.json"):
+    for path in find_files(root, ".json"):
         index.setdefault(path.stem, []).append(path)
         identifier = sample_id(path)
         if identifier:
@@ -80,7 +86,7 @@ def extract_dataset(
     json_root: Path | None = None,
     warning_log_path: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    cif_paths = sorted(root.rglob("*.cif"))
+    cif_paths = find_files(root, ".cif")
     if limit is not None:
         cif_paths = cif_paths[:limit]
     json_index = make_json_index(json_root or root)

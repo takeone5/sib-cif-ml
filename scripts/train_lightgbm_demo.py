@@ -74,9 +74,20 @@ def attach_folds(
 ) -> pd.DataFrame:
     if "source_cif" not in table.columns:
         raise ValueError("Feature table must contain a 'source_cif' column")
+    required_membership_columns = {"fold", "split", "relative_path"}
+    missing_membership_columns = required_membership_columns - set(membership.columns)
+    if missing_membership_columns:
+        raise ValueError(f"Fold membership is missing columns: {sorted(missing_membership_columns)}")
     membership = membership.copy()
     membership["relative_path"] = membership["relative_path"].astype(str).str.replace("\\", "/")
-    fold_by_path = dict(zip(membership["relative_path"], membership["fold"], strict=True))
+    # The membership CSV has one train/test row per sample for every fold.
+    # Each sample belongs to exactly one test fold; use that row as its fold.
+    test_membership = membership[membership["split"].astype(str).str.lower() == "test"]
+    duplicate_test_paths = test_membership["relative_path"].duplicated(keep=False)
+    if duplicate_test_paths.any():
+        examples = test_membership.loc[duplicate_test_paths, "relative_path"].head(3).tolist()
+        raise ValueError(f"CIF paths appear in multiple test folds: {examples}")
+    fold_by_path = dict(zip(test_membership["relative_path"], test_membership["fold"], strict=True))
     known_paths = list(fold_by_path)
     folds: list[int | None] = []
     for source in table["source_cif"]:
@@ -128,6 +139,15 @@ def main() -> None:
     before = len(table)
     table = table.dropna(subset=selected).copy()
     logger.info("Dataset: %d rows usable (%d dropped due to missing selected values)", len(table), before - len(table))
+    fold_counts = table["fold"].value_counts().reindex(sorted(int(value) for value in membership["fold"].unique()), fill_value=0)
+    logger.info("Usable rows per test fold: %s", fold_counts.to_dict())
+    empty_folds = fold_counts[fold_counts == 0].index.tolist()
+    if empty_folds:
+        raise ValueError(
+            "No usable test rows remain in fold(s) "
+            f"{empty_folds} after removing rows with missing selected features or target. "
+            "Check feature missingness and ensure the complete dataset was extracted."
+        )
     logger.info("Features: %s", ", ".join(FEATURE_COLUMNS))
     logger.info("Target: %s", target)
     logger.info("Split summary: %d samples, %d folds", summary["n_samples"], len(summary["folds"]))
