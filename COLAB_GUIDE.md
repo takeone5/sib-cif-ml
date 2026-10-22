@@ -37,7 +37,7 @@ assert (split_root / 'fold_membership.csv').is_file()
 
 ## 2. Feature 계산 및 Spearman 히트맵
 
-아래 명령은 CIF 루트와 JSON 루트의 하위 폴더를 재귀 탐색하고, 파일 stem 또는 지원되는 샘플 ID가 같은 JSON을 CIF에 연결합니다. 확장자는 대소문자를 구분하지 않습니다. `--limit`을 지정하지 않아야 전체 데이터가 계산됩니다.
+아래 명령은 CIF 루트와 JSON 루트의 하위 폴더를 재귀 탐색하고, 파일 stem 또는 지원되는 샘플 ID가 같은 JSON을 CIF에 연결합니다. 확장자는 대소문자를 구분하지 않습니다. CIF와 JSON에서 확인한 공간군이 각각 160, 166, 194 중 하나인 구조만 feature를 계산하고 히트맵 데이터에 넣습니다. `--limit`을 지정하지 않아야 전체 데이터가 계산됩니다.
 
 ```bash
 %cd /content/sib-cif-ml
@@ -46,11 +46,11 @@ assert (split_root / 'fold_membership.csv').is_file()
   -o "{feature_output}"
 ```
 
-`features_all.csv`에는 성공적으로 처리한 구조의 전체 feature가 저장됩니다. 히트맵에는 별도의 선택 기준이 적용되므로, CSV에 있는 모든 feature가 히트맵에 표시되는 것은 아닙니다. `extraction_errors.csv`가 비어 있지 않으면 실패한 CIF와 오류를 확인하고, `run_metadata.json`의 `successful_rows` 및 `error_rows`도 확인합니다.
+`features_all.csv`에는 성공적으로 처리한 적격 구조의 전체 feature와 출처별 CIF/JSON 공간군 번호가 저장됩니다. 히트맵에는 별도의 선택 기준이 적용되므로, CSV에 있는 모든 feature가 히트맵에 표시되는 것은 아닙니다. `excluded_space_groups.csv`에는 공간군 조건으로 제외한 구조가, `extraction_errors.csv`에는 계산에 실패한 구조가 기록됩니다. `run_metadata.json`의 `successful_rows`, `error_rows`, `excluded_unsupported_space_group_rows`도 확인합니다.
 
 ## 3. 학습 전 결측 및 fold 확인
 
-LightGBM은 코드에 지정된 12개 입력 feature와 `106_` 타깃 값이 모두 있는 행만 사용합니다. 다음 셀에서 각 열의 결측 수, 학습 가능 행 수, fold별 행 수를 확인합니다.
+LightGBM은 공간군 160, 166, 194인 구조 중 코드에 지정된 12개 입력 feature와 `106_` 타깃 값이 모두 있는 행만 사용합니다. 다음 셀에서 각 열의 결측 수, 학습 가능 행 수, fold별 행 수를 확인합니다.
 
 ```python
 import pandas as pd
@@ -79,20 +79,34 @@ target = target_columns[0]
 selected = feature_columns + [target]
 
 print('Feature rows:', len(table))
+cif_sg = pd.to_numeric(table['source_cif_space_group_number'], errors='coerce')
+json_sg = pd.to_numeric(table['source_json_space_group_number'], errors='coerce')
+eligible_mask = cif_sg.isin([160, 166, 194]) & (json_sg.isna() | json_sg.isin([160, 166, 194]))
+eligible = table.loc[eligible_mask].copy()
+print('Rows excluded for unsupported or unknown space group:', len(table) - len(eligible))
 print('Missing values by selected column:')
-display(table[selected].isna().sum().sort_values(ascending=False).to_frame('missing'))
-usable = table.dropna(subset=selected).copy()
-print('Rows usable for training:', len(usable), '/', len(table))
+display(eligible[selected].isna().sum().sort_values(ascending=False).to_frame('missing'))
+usable = eligible.dropna(subset=selected).copy()
+print('Rows usable for training:', len(usable), '/', len(eligible), 'eligible rows')
 
 # fold_membership.csv contains one test assignment per sample across all folds.
 test_rows = membership[membership['split'].astype(str).str.lower() == 'test']
 test_paths = test_rows['relative_path'].astype(str).str.replace(chr(92), '/', regex=False)
 fold_by_path = dict(zip(test_paths, test_rows['fold']))
+known_paths = list(fold_by_path)
 def relative_cif_path(source):
     return Path(source).resolve().relative_to(cif_root.resolve()).as_posix()
 
 usable['relative_path'] = usable['source_cif'].map(relative_cif_path)
-usable['fold'] = usable['relative_path'].map(fold_by_path)
+def find_fold(relative):
+    fold = fold_by_path.get(relative)
+    if fold is None:
+        matches = [path for path in known_paths if relative.endswith('/' + path) or relative == path]
+        if len(matches) == 1:
+            fold = fold_by_path[matches[0]]
+    return fold
+
+usable['fold'] = usable['relative_path'].map(find_fold)
 print('Rows without a fold match:', int(usable['fold'].isna().sum()))
 print('Usable rows per test fold:')
 display(usable.groupby('fold').size().reindex(sorted(membership['fold'].unique()), fill_value=0).to_frame('rows'))

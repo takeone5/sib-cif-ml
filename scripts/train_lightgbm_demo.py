@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error, r2_score
+from sib_features.extractor import SUPPORTED_SPACE_GROUP_NUMBERS
 
 
 FEATURE_COLUMNS = [
@@ -133,6 +134,21 @@ def main() -> None:
     missing_columns = [column for column in FEATURE_COLUMNS if column not in table.columns]
     if missing_columns:
         raise ValueError(f"Missing required feature columns: {missing_columns}")
+    source_sg_columns = {"source_cif_space_group_number", "source_json_space_group_number"}
+    missing_sg_columns = source_sg_columns - set(table.columns)
+    if missing_sg_columns:
+        raise ValueError(
+            "Feature CSV lacks source CIF/JSON space-group columns. "
+            "Regenerate features_all.csv with the current extractor; missing: "
+            f"{sorted(missing_sg_columns)}"
+        )
+    cif_space_groups = pd.to_numeric(table["source_cif_space_group_number"], errors="coerce")
+    json_space_groups = pd.to_numeric(table["source_json_space_group_number"], errors="coerce")
+    supported_cif = cif_space_groups.isin(SUPPORTED_SPACE_GROUP_NUMBERS)
+    supported_json = json_space_groups.isna() | json_space_groups.isin(SUPPORTED_SPACE_GROUP_NUMBERS)
+    unsupported = ~(supported_cif & supported_json)
+    logger.info("Excluded %d rows with unsupported or unknown space group", int(unsupported.sum()))
+    table = table.loc[~unsupported].copy()
 
     table = attach_folds(table, membership, args.data_root)
     selected = FEATURE_COLUMNS + [target]

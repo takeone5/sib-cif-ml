@@ -23,6 +23,8 @@ import numpy as np
 import pandas as pd
 
 from sib_features import FeatureExtractor
+from sib_features.extractor import UnsupportedSpaceGroupError
+from sib_features.fixed_charge import fixed_charge_unknown_elements
 from sib_features.io import warning_log
 
 
@@ -85,30 +87,59 @@ def extract_dataset(
     limit: int | None = None,
     json_root: Path | None = None,
     warning_log_path: Path | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     cif_paths = find_files(root, ".cif")
     if limit is not None:
         cif_paths = cif_paths[:limit]
     json_index = make_json_index(json_root or root)
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
+    excluded: list[dict[str, str]] = []
     total = len(cif_paths)
     with warning_log(warning_log_path):
         for number, cif_path in enumerate(cif_paths, start=1):
             json_path = match_json(cif_path, json_index)
             status = "OK"
             try:
-                result = FeatureExtractor.from_files(cif_path, json_path).extract()
-                row = {"source_cif": str(cif_path), "source_json": str(json_path) if json_path else ""}
+                extractor = FeatureExtractor.from_files(cif_path, json_path)
+                result = extractor.extract()
+                unknown_elements = fixed_charge_unknown_elements(extractor.structure)
+                if unknown_elements:
+                    print(
+                        f"\nWarning: feature 016 is null for {cif_path.name}; no fixed oxidation state "
+                        f"is defined for: {', '.join(unknown_elements)}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                source_numbers = extractor.source_space_group_numbers()
+                row = {
+                    "source_cif": str(cif_path),
+                    "source_json": str(json_path) if json_path else "",
+                    "source_cif_space_group_number": source_numbers.get("CIF"),
+                    "source_json_space_group_number": source_numbers.get("JSON"),
+                }
                 row.update(flatten_numeric(result))
                 rows.append(row)
+            except UnsupportedSpaceGroupError as exc:
+                status = "EXCLUDED"
+                excluded.append(
+                    {
+                        "source_cif": str(cif_path),
+                        "source_json": str(json_path) if json_path else "",
+                        "reason": str(exc),
+                    }
+                )
             except Exception as exc:  # Keep one malformed structure from stopping a batch.
                 status = "FAIL"
                 errors.append({"source_cif": str(cif_path), "error": repr(exc)})
             print(f"\r[{number}/{total}] {cif_path.name} ; {status}", end="", flush=True)
     if total:
         print()
-    return pd.DataFrame(rows), pd.DataFrame(errors, columns=["source_cif", "error"])
+    return (
+        pd.DataFrame(rows),
+        pd.DataFrame(errors, columns=["source_cif", "error"]),
+        pd.DataFrame(excluded, columns=["source_cif", "source_json", "reason"]),
+    )
 
 
 def plot_heatmap(correlation: pd.DataFrame, output: Path, figsize: tuple[float, float]) -> None:
@@ -279,13 +310,15 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     warning_log_path = args.warning_log or args.output_dir / "warnings.log"
-    table, errors = extract_dataset(args.data_root, args.limit, args.json_root, warning_log_path)
+    table, errors, excluded = extract_dataset(args.data_root, args.limit, args.json_root, warning_log_path)
     if table.empty:
         print("No CIF produced a feature row.", file=sys.stderr)
         errors.to_csv(args.output_dir / "extraction_errors.csv", index=False)
+        excluded.to_csv(args.output_dir / "excluded_space_groups.csv", index=False)
         raise SystemExit(1)
     table.to_csv(args.output_dir / "features_all.csv", index=False)
     errors.to_csv(args.output_dir / "extraction_errors.csv", index=False)
+    excluded.to_csv(args.output_dir / "excluded_space_groups.csv", index=False)
 
     numeric = select_heatmap_features(table)
     correlation = numeric.corr(method="spearman", min_periods=args.min_periods)
@@ -308,6 +341,7 @@ def main() -> None:
         "cif_count_requested": args.limit,
         "successful_rows": int(len(table)),
         "error_rows": int(len(errors)),
+        "excluded_unsupported_space_group_rows": int(len(excluded)),
         "warning_log": str(warning_log_path),
         "interactive_heatmap": str(interactive_output) if interactive_created else None,
         "numeric_columns_in_heatmap": int(len(numeric.columns)),

@@ -31,6 +31,17 @@ from .thickness import calculate_layer_thicknesses
 from .local import extract_local_features
 from .fixed_charge import variable_tm_group_total_charge
 
+SUPPORTED_SPACE_GROUP_NUMBERS = frozenset({160, 166, 194})
+
+
+class UnsupportedSpaceGroupError(ValueError):
+    """Raised when any available CIF/JSON space-group value is unsupported."""
+
+    def __init__(self, source_numbers: dict[str, int]):
+        self.source_numbers = source_numbers
+        detail = ", ".join(f"{source}={number}" for source, number in source_numbers.items())
+        super().__init__(f"Unsupported space group (allowed: 160, 166, 194): {detail}")
+
 
 @lru_cache(maxsize=1)
 def _matminer_data():
@@ -118,6 +129,23 @@ class FeatureExtractor:
             return cif_number
         return int(self.structure.get_space_group_info()[1])
 
+    def source_space_group_numbers(self) -> dict[str, int]:
+        """Return each declared CIF/JSON number, inferring CIF symmetry if absent."""
+        numbers: dict[str, int] = {}
+        json_group = self.metadata.get("space_group")
+        json_number = json_group.get("number") if isinstance(json_group, dict) else None
+        if json_number is not None:
+            numbers["JSON"] = int(json_number)
+        cif_number = self.cif_space_group_number
+        if cif_number is None:
+            try:
+                cif_number = int(self.structure.get_space_group_info()[1])
+            except Exception:
+                cif_number = None
+        if cif_number is not None:
+            numbers["CIF"] = int(cif_number)
+        return numbers
+
     def _site_rows(self) -> list[dict[str, Any]]:
         """Return JSON rows, or CIF sites with an inferred row label."""
         if self.json_sites:
@@ -185,6 +213,9 @@ class FeatureExtractor:
         return {s: v / total for s, v in totals.items()} if total else {}
 
     def extract(self) -> dict[str, Any]:
+        source_numbers = self.source_space_group_numbers()
+        if not source_numbers or any(number not in SUPPORTED_SPACE_GROUP_NUMBERS for number in source_numbers.values()):
+            raise UnsupportedSpaceGroupError(source_numbers or {"CIF": -1})
         rows = self._site_rows()
         na_rows = self._na_rows()
         tm_rows = self._tm_rows()

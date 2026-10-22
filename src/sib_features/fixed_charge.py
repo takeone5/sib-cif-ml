@@ -14,14 +14,17 @@ FIXED_OXIDATION_STATES = {
     "Mg": 2,
     "Al": 3,
     "Ca": 2,
+    "Sr": 2,
     "Zn": 2,
     "K": 1,
     "Sn": 4,
     "Cr": 3,
     "La": 3,
     "Ce": 3,
+    "Bi": 3,
     "F": -1,
     "Ta": 5,
+    "Nb": 5,
     "B": 3,
     "Zr": 4,
     "Sc": 3,
@@ -52,6 +55,28 @@ def load_reference_oxidation_states() -> dict[str, int]:
     return dict(FIXED_OXIDATION_STATES)
 
 
+def _unknown_fixed_elements(
+    composition: dict[str, float], variable_symbols: frozenset[str]
+) -> tuple[str, ...]:
+    group_amount = sum(composition.get(symbol, 0.0) for symbol in variable_symbols)
+    if group_amount <= 0:
+        return ()
+    fixed_states = load_reference_oxidation_states()
+    fixed_states["Na"] = 1
+    return tuple(
+        sorted(
+            symbol
+            for symbol, amount in composition.items()
+            if amount > 1e-12 and symbol not in variable_symbols and symbol not in fixed_states
+        )
+    )
+
+
+def fixed_charge_unknown_elements(structure: Structure) -> tuple[str, ...]:
+    """Return elements preventing feature 016 from being calculated."""
+    return _unknown_fixed_elements(_normalized_composition(structure), VARIABLE_TM_GROUP)
+
+
 def variable_tm_group_total_charge(
     structure: Structure,
     *,
@@ -65,10 +90,7 @@ def variable_tm_group_total_charge(
     group_amount = sum(composition.get(symbol, 0.0) for symbol in variable_symbols)
     if group_amount <= 0:
         return None
-    unknown = [
-        symbol for symbol, amount in composition.items()
-        if amount > 1e-12 and symbol not in variable_symbols and symbol not in fixed_states
-    ]
+    unknown = _unknown_fixed_elements(composition, variable_symbols)
     if unknown:
         return None
     fixed_charge = sum(
