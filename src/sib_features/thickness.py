@@ -117,7 +117,20 @@ def calculate_layer_thicknesses(structure: Structure, metadata: dict[str, Any] |
         na_rows = [row for row in rows if _has_element(row, {"Na"})]
         if not na_rows:
             raise ValueError("R-3m structure has no Na site")
-        na_z = float(na_rows[0]["coords"][2])
+        # A CIF parser expands the asymmetric unit into symmetry-equivalent
+        # sites. The first expanded Na may therefore be at z=1/6 or 5/6 even
+        # when the representative CIF coordinate is z=0 or 1/2. Prefer one
+        # of the representative coordinates used by the equations below.
+        na_zs = [float(row["coords"][2]) for row in na_rows if len(row.get("coords", [])) >= 3]
+        representative_zs = [
+            z for z in na_zs
+            if math.isclose(z, 0.0, abs_tol=1e-5)
+            or math.isclose(z, 1.0, abs_tol=1e-5)
+            or math.isclose(z, 0.5, abs_tol=1e-5)
+        ]
+        if not representative_zs:
+            raise ValueError(f"R-3m Na has no representative z coordinate (found: {na_zs})")
+        na_z = representative_zs[0]
         if math.isclose(na_z, 0.0, abs_tol=1e-5) or math.isclose(na_z, 1.0, abs_tol=1e-5):
             d_na = 2 * (1.0 / 3.0 - zo) * c
         elif math.isclose(na_z, 0.5, abs_tol=1e-5):
