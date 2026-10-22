@@ -169,12 +169,14 @@ def main() -> None:
     logger.info("Split summary: %d samples, %d folds", summary["n_samples"], len(summary["folds"]))
 
     params = {
-        "max_depth": 4,
-        "num_leaves": 10,
-        "min_child_samples": 4,
-        "learning_rate": 0.03,
-        "colsample_bytree": 0.8,
-        "n_estimators": 100,
+        "max_depth": 3,
+        "num_leaves": 7,
+        "min_child_samples": 8,
+        "learning_rate": 0.05,
+        "colsample_bytree": 0.7,
+        "n_estimators": 150,
+        "reg_lambda": 3.0,
+        "reg_alpha": 0.1,
         "objective": "regression",
         "random_state": 42,
         "verbosity": -1,
