@@ -137,10 +137,13 @@ display(usable.groupby('fold').size().reindex(sorted(membership['fold'].unique()
 ```
 
 ```python
-from IPython.display import Image, display
+from IPython.display import HTML, Image, display
 
 for filename in ['actual_vs_predicted.png', 'fold_metrics.png', 'feature_importance.png']:
     display(Image(filename=str(model_output / filename)))
+
+# Interactive version: hover over a point to see its CIF filename and values.
+display(HTML(filename=str(model_output / 'actual_vs_predicted.html')))
 ```
 
-그래프 파일은 `model_output`에 저장됩니다. 실행 결과와 원본 데이터는 Google Drive에 남으므로 Colab 런타임을 다시 연결해도 사용할 수 있습니다.
+대화형 그래프에서 점 위에 마우스를 올리면 CIF 파일명, 전체 경로, 실제값, 예측값, 잔차가 표시됩니다. PNG와 HTML 그래프 파일은 `model_output`에 저장됩니다. 실행 결과와 원본 데이터는 Google Drive에 남으므로 Colab 런타임을 다시 연결해도 사용할 수 있습니다.
