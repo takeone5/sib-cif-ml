@@ -28,7 +28,10 @@ from sib_features.fixed_charge import fixed_charge_unknown_elements
 from sib_features.io import warning_log
 
 
-SAMPLE_ID_RE = re.compile(r"^(?P<id>\d+_S\d+(?:_\d+)?)")
+# Support IDs such as ``035_S7`` and ``168_c``. An optional numeric component
+# (for example ``597_S2_1``) is included only when followed by an underscore
+# or the end of the stem. Thus ``035_S7_003-NFM_NPD`` resolves to ``035_S7``.
+SAMPLE_ID_RE = re.compile(r"^(?P<id>\d+_[A-Za-z]\d*(?:_\d+)?)(?=_|$)")
 DEFAULT_DATA_ROOT = Path("split_data_v1/fold_1/train")
 DEFAULT_OUTPUT_DIR = Path("correlation_output/fold_1_train_spearman")
 EXCLUDED_HEATMAP_FEATURE_IDS = {101, 102, 103, 104, 105, 106}
