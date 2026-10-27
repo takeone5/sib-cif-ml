@@ -84,22 +84,41 @@ def _r3m_3a_thicknesses(rows: list[dict[str, Any]], c: float) -> tuple[float, fl
     return d_tm, c / 3.0 - d_tm
 
 
-def _space_group(metadata: dict[str, Any], structure: Structure) -> str:
-    symbol = metadata.get("space_group", {}).get("symbol")
-    return symbol or structure.get_space_group_info()[0]
+def _space_group(metadata: dict[str, Any]) -> str:
+    space_group = metadata.get("space_group", {})
+    symbol = space_group.get("symbol")
+    if symbol:
+        return symbol
+    return {160: "R3m", 166: "R-3m", 194: "P63/mmc"}.get(space_group.get("number"), "")
 
 
-def calculate_layer_thicknesses(structure: Structure, metadata: dict[str, Any] | None = None) -> dict[str, float]:
+def calculate_layer_thicknesses(
+    structure: Structure | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, float | None]:
     """Return O-Na-O and O-TM-O slab distances and their ratio.
 
-    Supported space groups and equations intentionally match the existing
-    spreadsheet: ``P63/mmc``, ``R-3m``, and ``R3m`` (No. 160).
+    Geometry inputs come only from JSON metadata so symmetry-expanded CIF
+    coordinates cannot be mistaken for representative site coordinates. The
+    structure argument remains optional for compatibility with existing callers
+    but is intentionally not used. Missing JSON geometry returns null features.
     """
     metadata = metadata or {}
+    missing = {
+        "104_O_TM_O_distance_A": None,
+        "105_O_Na_O_distance_A": None,
+        "106_O_Na_O_to_O_TM_O_ratio": None,
+    }
+    lattice_parameters = metadata.get("lattice_parameters")
+    if not isinstance(lattice_parameters, dict) or lattice_parameters.get("c") is None:
+        return missing
+    if not metadata.get("sites") or not isinstance(metadata.get("space_group"), dict):
+        return missing
+
     rows = _site_rows(structure, metadata)
-    c = float(structure.lattice.c)
+    c = float(lattice_parameters["c"])
     zo = _representative_anion_z(rows)
-    sg_symbol = _space_group(metadata, structure)
+    sg_symbol = _space_group(metadata)
 
     if sg_symbol == "P63/mmc":
         if abs(zo - 0.41) <= 0.05:
