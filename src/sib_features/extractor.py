@@ -30,6 +30,7 @@ from .chemistry import (
 from .thickness import calculate_layer_thicknesses
 from .local import extract_local_features
 from .fixed_charge import variable_tm_group_total_charge
+from .bvs_gii import calculate_bvs_gii_features
 
 SUPPORTED_SPACE_GROUP_NUMBERS = frozenset({160, 166, 194})
 
@@ -271,4 +272,7 @@ class FeatureExtractor:
             }
         )
         features.update(extract_local_features(self.structure))
+        # Keep these global bond-valence features as the final two columns in
+        # flattened dataset CSVs, after all existing features.
+        features.update(calculate_bvs_gii_features(self.structure))
         return features
