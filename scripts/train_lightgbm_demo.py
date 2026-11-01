@@ -58,6 +58,27 @@ def target_column(table: pd.DataFrame) -> str:
     return targets[0]
 
 
+def parse_feature_selection(
+    available_columns: list[str],
+    add_features: list[str],
+    exclude_features: list[str],
+) -> list[str]:
+    unknown_exclusions = [feature for feature in exclude_features if feature not in available_columns]
+    if unknown_exclusions:
+        raise ValueError(f"Excluded feature columns are missing from the CSV: {unknown_exclusions}")
+    selected = list(FEATURE_COLUMNS)
+    for feature in add_features:
+        if feature not in selected:
+            selected.append(feature)
+    selected = [feature for feature in selected if feature not in set(exclude_features)]
+    if not selected:
+        raise ValueError("Feature selection is empty; include at least one feature")
+    missing = [feature for feature in selected if feature not in available_columns]
+    if missing:
+        raise ValueError(f"Selected feature columns are missing from the CSV: {missing}")
+    return selected
+
+
 def source_to_relative(source: str, data_root: Path | None) -> str:
     source_path = Path(str(source))
     if data_root is not None:
@@ -109,8 +130,28 @@ def attach_folds(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train/evaluate the fixed-parameter LightGBM demo model.")
+    parser = argparse.ArgumentParser(description="Train/evaluate a LightGBM 5-fold demo model.")
     parser.add_argument("--features", type=Path, default=DEFAULT_FEATURES, help="features_all.csv from feature extraction")
+    parser.add_argument(
+        "--add-features",
+        nargs="+",
+        action="append",
+        default=[],
+        metavar="COLUMN",
+        help="Add feature column(s) to the default set; repeat the option as needed",
+    )
+    parser.add_argument(
+        "--exclude-features",
+        nargs="+",
+        action="append",
+        default=[],
+        metavar="COLUMN",
+        help="Remove feature column(s) from the default set; repeat the option as needed",
+    )
+    parser.add_argument(
+        "--target",
+        help="Target column (defaults to the only column whose name starts with '106_')",
+    )
     parser.add_argument("--split-root", type=Path, default=DEFAULT_SPLIT_ROOT)
     parser.add_argument("--data-root", type=Path, help="CIF root used to create the feature table")
     parser.add_argument("-o", "--output-dir", type=Path, default=DEFAULT_OUTPUT)
@@ -130,10 +171,14 @@ def main() -> None:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     membership = pd.read_csv(membership_path)
     table = pd.read_csv(args.features)
-    target = target_column(table)
-    missing_columns = [column for column in FEATURE_COLUMNS if column not in table.columns]
-    if missing_columns:
-        raise ValueError(f"Missing required feature columns: {missing_columns}")
+    target = args.target or target_column(table)
+    if target not in table.columns:
+        raise ValueError(f"Target column {target!r} is missing from the feature CSV")
+    added_features = [feature for group in args.add_features for feature in group]
+    excluded_features = [feature for group in args.exclude_features for feature in group]
+    selected_features = parse_feature_selection(table.columns.tolist(), added_features, excluded_features)
+    if target in selected_features:
+        raise ValueError(f"Target column {target!r} cannot also be selected as an input feature")
     source_sg_columns = {"source_cif_space_group_number", "source_json_space_group_number"}
     missing_sg_columns = source_sg_columns - set(table.columns)
     if missing_sg_columns:
@@ -151,7 +196,7 @@ def main() -> None:
     table = table.loc[~unsupported].copy()
 
     table = attach_folds(table, membership, args.data_root)
-    selected = FEATURE_COLUMNS + [target]
+    selected = selected_features + [target]
     before = len(table)
     table = table.dropna(subset=selected).copy()
     logger.info("Dataset: %d rows usable (%d dropped due to missing selected values)", len(table), before - len(table))
@@ -164,7 +209,7 @@ def main() -> None:
             f"{empty_folds} after removing rows with missing selected features or target. "
             "Check feature missingness and ensure the complete dataset was extracted."
         )
-    logger.info("Features: %s", ", ".join(FEATURE_COLUMNS))
+    logger.info("Features: %s", ", ".join(selected_features))
     logger.info("Target: %s", target)
     logger.info("Split summary: %d samples, %d folds", summary["n_samples"], len(summary["folds"]))
 
@@ -186,14 +231,18 @@ def main() -> None:
     fold_results: list[dict[str, float | int]] = []
     all_predictions: list[pd.DataFrame] = []
     feature_importances: list[np.ndarray] = []
+    gain_importances: list[np.ndarray] = []
     for fold in sorted(int(value) for value in membership["fold"].unique()):
         train = table[table["fold"] != fold]
         test = table[table["fold"] == fold]
         model = LGBMRegressor(**params)
-        model.fit(train[FEATURE_COLUMNS], train[target])
+        model.fit(train[selected_features], train[target])
         feature_importances.append(np.asarray(model.feature_importances_, dtype=float))
-        train_pred = model.predict(train[FEATURE_COLUMNS])
-        test_pred = model.predict(test[FEATURE_COLUMNS])
+        gain_importances.append(
+            np.asarray(model.booster_.feature_importance(importance_type="gain"), dtype=float)
+        )
+        train_pred = model.predict(train[selected_features])
+        test_pred = model.predict(test[selected_features])
         result = {
             "fold": fold,
             "train_r2": float(r2_score(train[target], train_pred)),
@@ -236,15 +285,24 @@ def main() -> None:
     pd.concat(all_predictions, ignore_index=True).to_csv(args.output_dir / "test_predictions.csv", index=False)
     pd.DataFrame(
         {
-            "feature": FEATURE_COLUMNS,
+            "feature": selected_features,
             "importance_mean": np.mean(feature_importances, axis=0),
             "importance_std": np.std(feature_importances, axis=0),
         }
     ).sort_values("importance_mean", ascending=False).to_csv(
         args.output_dir / "feature_importance.csv", index=False
     )
+    pd.DataFrame(
+        {
+            "feature": selected_features,
+            "importance_mean": np.mean(gain_importances, axis=0),
+            "importance_std": np.std(gain_importances, axis=0),
+        }
+    ).sort_values("importance_mean", ascending=False).to_csv(
+        args.output_dir / "gain_feature_importance.csv", index=False
+    )
     report = {
-        "features": FEATURE_COLUMNS,
+        "features": selected_features,
         "target": target,
         "parameters": params,
         "mean_train_r2": train_r2,

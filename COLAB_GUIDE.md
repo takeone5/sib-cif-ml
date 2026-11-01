@@ -127,7 +127,11 @@ display(usable.groupby('fold').size().reindex(sorted(membership['fold'].unique()
   -o "{model_output}"
 ```
 
-`train.log`, `fold_metrics.csv`, `test_predictions.csv`, `feature_importance.csv`, `metrics.json`이 저장됩니다.
+`train.log`, `fold_metrics.csv`, `test_predictions.csv`, `feature_importance.csv`(split 기준), `gain_feature_importance.csv`(gain 기준), `metrics.json`이 저장됩니다.
+
+기본 12개 입력 피처는 `--add-features COLUMN ...`으로 추가하고 `--exclude-features COLUMN ...`으로 제외할 수 있습니다. 컬럼명은 `features_all.csv` 헤더와 같아야 합니다. 타겟은 기본적으로 `106_`으로 시작하는 유일한 컬럼을 사용하며, 직접 지정하려면 `--target COLUMN`을 전달합니다.
+
+LightGBM은 코드에 정의된 고정 파라미터로 학습합니다. 결과와 파라미터에 대한 자세한 내용은 [LIGHTGBM_README.md](LIGHTGBM_README.md)를 참고하세요.
 
 ## 5. 학습 결과 그래프
 
@@ -139,7 +143,7 @@ display(usable.groupby('fold').size().reindex(sorted(membership['fold'].unique()
 ```python
 from IPython.display import HTML, Image, display
 
-for filename in ['actual_vs_predicted.png', 'fold_metrics.png', 'feature_importance.png']:
+for filename in ['actual_vs_predicted.png', 'fold_metrics.png', 'feature_importance.png', 'gain_feature_importance.png']:
     display(Image(filename=str(model_output / filename)))
 
 # Interactive version: hover over a point to see its CIF filename and values.

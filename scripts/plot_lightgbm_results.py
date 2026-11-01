@@ -100,11 +100,14 @@ def plot_metrics(metrics: pd.DataFrame, output: Path) -> None:
     plt.close(figure)
 
 
-def plot_importance(importances: pd.DataFrame, output: Path) -> None:
+def plot_importance(importances: pd.DataFrame, output: Path, importance_type: str = "split") -> None:
     data = importances.sort_values("importance_mean", ascending=True)
     figure, axis = plt.subplots(figsize=(9, 7))
     axis.barh(data["feature"], data["importance_mean"], xerr=data["importance_std"], color="#377eb8", alpha=0.85)
-    axis.set(xlabel="Mean LightGBM split importance", title="Feature importance across folds")
+    axis.set(
+        xlabel=f"Mean LightGBM {importance_type} importance",
+        title=f"Feature {importance_type} importance across folds",
+    )
     axis.grid(axis="x", alpha=0.25)
     figure.tight_layout()
     figure.savefig(output, dpi=220, bbox_inches="tight")
@@ -122,6 +125,7 @@ def main() -> None:
     predictions = pd.read_csv(args.input_dir / "test_predictions.csv")
     metrics = pd.read_csv(args.input_dir / "fold_metrics.csv")
     importances = pd.read_csv(args.input_dir / "feature_importance.csv")
+    gain_importances = pd.read_csv(args.input_dir / "gain_feature_importance.csv")
     required_prediction_columns = {"fold", "target", "prediction", "source_cif"}
     if not required_prediction_columns.issubset(predictions.columns):
         raise ValueError(f"test_predictions.csv must contain {sorted(required_prediction_columns)}")
@@ -129,6 +133,7 @@ def main() -> None:
     plot_interactive_predictions(predictions, output_dir / "actual_vs_predicted.html")
     plot_metrics(metrics, output_dir / "fold_metrics.png")
     plot_importance(importances, output_dir / "feature_importance.png")
+    plot_importance(gain_importances, output_dir / "gain_feature_importance.png", "gain")
     print(f"Saved plots to {output_dir}")
 
 

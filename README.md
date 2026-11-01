@@ -30,25 +30,9 @@ JSON은 선택 사항입니다. 제공하면 Wyckoff metadata 등을 사용합�
 
 히트맵은 숫자형 feature ID `001–114` 중 `101–106`을 제외하고, 값이 전부 비었거나 상수인 열도 제외합니다. Local feature ID `201` 이상은 히트맵에 포함되지 않습니다. 일부 행만 비어 있는 열은 히트맵 후보로 남고, 상관계수는 유효한 값 쌍으로 계산합니다.
 
-## LightGBM 5-fold 데모
+## 모델별 실행 안내
 
-전체 데이터로 `features_all.csv`를 만든 다음 기존 `split_data_v1`의 `summary.json`과 `fold_membership.csv`를 사용합니다. `--data-root`는 feature CSV 생성에 사용한 CIF 루트여야 합니다.
-
-```bash
-.venv/bin/python scripts/train_lightgbm_demo.py \
-  --features correlation_output/features_all.csv \
-  --data-root /path/to/cif_root \
-  --split-root split_data_v1 \
-  -o ml_output/lightgbm_demo
-```
-
-모델은 공간군이 160, 166, 194인 구조만 사용합니다. 입력은 코드에 지정된 12개 feature입니다: `002`, `003`, `008`, `010`, `016`, `107`, `108`, `110`, `111`, `112`, `113`, `114`. `106_O_Na_O_to_O_TM_O_ratio`는 예측 대상이며 입력 feature가 아닙니다. 선택된 입력값이나 타깃이 하나라도 비어 있는 행은 제외됩니다. 따라서 유효 행이 적거나 특정 fold의 테스트 행이 없어지면 학습/평가가 실패할 수 있습니다.
-
-결과는 `train.log`, `fold_metrics.csv`, `test_predictions.csv`, `feature_importance.csv`, `metrics.json`으로 저장됩니다. 그래프는 다음 명령으로 생성할 수 있습니다.
-
-```bash
-.venv/bin/python scripts/plot_lightgbm_results.py ml_output/lightgbm_demo
-```
+LightGBM 학습, feature 선택, 파라미터, 결과 파일 및 그래프 안내는 [LIGHTGBM_README.md](LIGHTGBM_README.md)를 참고하세요. [GPR_README.md](GPR_README.md)와 [SVR_README.md](SVR_README.md)에는 각 모델별 실행 안내가 있습니다.
 
 ## Feature 구성
 
