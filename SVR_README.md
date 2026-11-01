@@ -22,7 +22,18 @@ LightGBM 및 GPR 데모와 같은 feature CSV와 `split_data_v1` fold 배정을 
 SVR(kernel='rbf', C=10.0, epsilon=0.03, gamma='scale')
 ```
 
-이 데모는 위의 고정 설정을 모든 fold에서 사용하며 별도의 하이퍼파라미터 탐색 옵션은 제공하지 않습니다. 사용 파라미터는 CLI와 `train.log`에 기록됩니다.
+기본 실행은 위의 고정 설정을 사용합니다. `--tune`에 `PARAM=VALUE` 형식으로 지정하면 해당 파라미터만 덮어씁니다. 지정하지 않은 파라미터는 기본값을 유지합니다. 자동 탐색이나 추가 CV는 수행하지 않습니다.
+
+```bash
+.venv/bin/python scripts/train_svr_demo.py \
+  --features correlation_output/features_all.csv \
+  --data-root /path/to/cif_root \
+  --split-root split_data_v1 \
+  --tune C=100 epsilon=0.1 gamma=0.01 \
+  -o ml_output/svr_tuned
+```
+
+지원 파라미터는 `C`, `epsilon`, `gamma`, `kernel`입니다. 예를 들어 `--tune C=100`만 지정하면 나머지는 기본값을 사용합니다. 입력한 파라미터는 모든 outer fold에 동일하게 적용되며 결과 파일과 로그에 기록됩니다.
 
 ## 평가 및 결과
 

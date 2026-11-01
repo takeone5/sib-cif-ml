@@ -49,6 +49,10 @@ def main() -> None:
     parser.add_argument("--target", help="Target column (defaults to the only column whose name starts with '106_')")
     parser.add_argument("--split-root", type=Path, default=DEFAULT_SPLIT_ROOT)
     parser.add_argument("--data-root", type=Path, help="CIF root used to create the feature table")
+    parser.add_argument(
+        "--tune", nargs="+", metavar="PARAM=VALUE",
+        help="Override SVR parameters, e.g. --tune C=100 epsilon=0.1 gamma=0.01",
+    )
     parser.add_argument("-o", "--output-dir", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
@@ -93,7 +97,28 @@ def main() -> None:
     logger.info("Features: %s", ", ".join(selected_features))
     logger.info("Target: %s", target)
     logger.info("Split summary: %d samples, %d folds", summary["n_samples"], len(summary["folds"]))
-    logger.info("Baseline SVR parameters: %s", BASELINE_PARAMS)
+    params = BASELINE_PARAMS.copy()
+    if args.tune:
+        valid_params = {"C", "epsilon", "gamma", "kernel"}
+        for item in args.tune:
+            if "=" not in item:
+                raise ValueError(f"Invalid --tune value {item!r}; use PARAM=VALUE")
+            name, value = item.split("=", 1)
+            if name not in valid_params:
+                raise ValueError(f"Unknown SVR parameter {name!r}; choose from {sorted(valid_params)}")
+            if name in {"C", "epsilon"}:
+                try:
+                    params[name] = float(value)
+                except ValueError as exc:
+                    raise ValueError(f"SVR parameter {name} must be numeric") from exc
+            elif name == "gamma" and value not in {"scale", "auto"}:
+                try:
+                    params[name] = float(value)
+                except ValueError as exc:
+                    raise ValueError("SVR parameter gamma must be 'scale', 'auto', or numeric") from exc
+            else:
+                params[name] = value
+    logger.info("SVR parameters: %s", params)
 
     fold_results: list[dict[str, float | int | str]] = []
     predictions: list[pd.DataFrame] = []
@@ -108,7 +133,7 @@ def main() -> None:
         scaler = StandardScaler()
         x_train_scaled = scaler.fit_transform(x_train)
         x_test_scaled = scaler.transform(x_test)
-        model = SVR(**BASELINE_PARAMS)
+        model = SVR(**params)
         model.fit(x_train_scaled, y_train)
         train_pred = model.predict(x_train_scaled)
         test_pred = model.predict(x_test_scaled)
@@ -119,7 +144,7 @@ def main() -> None:
             "test_rmse": float(math.sqrt(mean_squared_error(test[target], test_pred))),
             "n_train": int(len(train)),
             "n_test": int(len(test)),
-            "parameters": json.dumps(BASELINE_PARAMS, sort_keys=True),
+            "parameters": json.dumps(params, sort_keys=True),
         }
         fold_results.append(result)
         predictions.append(pd.DataFrame({
@@ -147,7 +172,7 @@ def main() -> None:
     report = {
         "features": selected_features,
         "target": target,
-        "parameters": BASELINE_PARAMS,
+        "parameters": params,
         **aggregate,
         "total_elapsed_seconds": elapsed,
         "fold_metrics": fold_results,

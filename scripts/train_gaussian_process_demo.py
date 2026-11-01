@@ -175,7 +175,7 @@ def display_plots_in_colab(plot_paths: list[Path]) -> None:
     print("Displaying GPR plots in the Colab output:")
     for path in plot_paths:
         print(path.name)
-        display(Image(filename=str(path)))
+        display(Image(filename=str(path), width=500))
 
 
 def main() -> None:

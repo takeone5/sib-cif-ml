@@ -154,6 +154,10 @@ def main() -> None:
     )
     parser.add_argument("--split-root", type=Path, default=DEFAULT_SPLIT_ROOT)
     parser.add_argument("--data-root", type=Path, help="CIF root used to create the feature table")
+    parser.add_argument(
+        "--tune", nargs="+", metavar="PARAM=VALUE",
+        help="Override LightGBM parameters, e.g. --tune n_estimators=300 learning_rate=0.03",
+    )
     parser.add_argument("-o", "--output-dir", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
@@ -226,6 +230,27 @@ def main() -> None:
         "random_state": 42,
         "verbosity": -1,
     }
+    if args.tune:
+        for item in args.tune:
+            if "=" not in item:
+                raise ValueError(f"Invalid --tune value {item!r}; use PARAM=VALUE")
+            name, value = item.split("=", 1)
+            if name not in params:
+                raise ValueError(f"Unknown LightGBM parameter {name!r}; choose from {sorted(params)}")
+            default = params[name]
+            try:
+                if isinstance(default, bool):
+                    params[name] = value.lower() in {"true", "1", "yes"}
+                    if value.lower() not in {"true", "false", "1", "0", "yes", "no"}:
+                        raise ValueError
+                elif isinstance(default, int):
+                    params[name] = int(value)
+                elif isinstance(default, float):
+                    params[name] = float(value)
+                else:
+                    params[name] = value
+            except ValueError as exc:
+                raise ValueError(f"Invalid value {value!r} for LightGBM parameter {name!r}") from exc
     logger.info("Model parameters: %s", params)
 
     fold_results: list[dict[str, float | int]] = []

@@ -50,7 +50,18 @@ learning_rate=0.05, colsample_bytree=0.7, n_estimators=150
 reg_lambda=3.0, reg_alpha=0.1, objective='regression', random_state=42
 ```
 
-모델은 위의 고정 파라미터를 모든 fold에 적용합니다. 별도의 하이퍼파라미터 탐색 옵션은 제공하지 않습니다. 실제 학습에 사용되는 파라미터는 CLI와 `train.log`에 출력됩니다.
+모델은 기본적으로 위 파라미터를 모든 fold에 적용합니다. `--tune PARAM=VALUE`로 원하는 파라미터를 직접 덮어쓸 수 있으며, 지정하지 않은 값은 기본값을 유지합니다. 자동 탐색이나 inner CV는 수행하지 않습니다. 실제 학습에 사용되는 파라미터는 CLI와 `train.log`에 출력됩니다.
+
+```bash
+.venv/bin/python scripts/train_lightgbm_demo.py \
+  --features correlation_output/features_all.csv \
+  --data-root /path/to/cif_root \
+  --split-root split_data_v1 \
+  --tune n_estimators=300 learning_rate=0.03 num_leaves=15 \
+  -o ml_output/lightgbm_tuned
+```
+
+기본 파라미터 목록에 있는 항목은 모두 지정할 수 있습니다. 정수/실수 파라미터는 값에 맞춰 변환하고, `objective` 같은 문자열 파라미터는 문자열로 전달합니다.
 
 ## 데이터와 평가
 
