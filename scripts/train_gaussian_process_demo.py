@@ -186,6 +186,10 @@ def main() -> None:
     parser.add_argument("--target", help="Target column (defaults to the only column whose name starts with '106_')")
     parser.add_argument("--split-root", type=Path, default=DEFAULT_SPLIT_ROOT)
     parser.add_argument("--data-root", type=Path, help="CIF root used to create the feature table")
+    parser.add_argument(
+        "--tune", nargs="+", metavar="PARAM=VALUE",
+        help="Override GPR parameters, e.g. --tune n_restarts_optimizer=5",
+    )
     parser.add_argument("-o", "--output-dir", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
@@ -231,11 +235,61 @@ def main() -> None:
     logger.info("Target: %s", target)
     logger.info("Split summary: %d samples, %d folds", summary["n_samples"], len(summary["folds"]))
     model_params = {
-        "kernel": "ConstantKernel(1.0, (1e-2, 1e2)) * RBF(length_scale=np.ones(n_features), length_scale_bounds=(1e-2, 1e2)) + WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-5, 1e-1))",
         "n_restarts_optimizer": 10,
+        "constant_value": 1.0,
+        "constant_value_bounds": (1e-2, 1e2),
+        "rbf_length_scale": 1.0,
+        "rbf_length_scale_bounds": (1e-2, 1e2),
+        "white_noise_level": 1e-3,
+        "white_noise_level_bounds": (1e-5, 1e-1),
         "normalize_y": True,
         "random_state": 42,
     }
+    tunable_float_params = {"constant_value", "rbf_length_scale", "white_noise_level"}
+    tunable_bounds_params = {
+        "constant_value_bounds", "rbf_length_scale_bounds", "white_noise_level_bounds"
+    }
+    if args.tune:
+        for item in args.tune:
+            if "=" not in item:
+                raise ValueError(f"Invalid --tune value {item!r}; use PARAM=VALUE")
+            name, value = item.split("=", 1)
+            if name not in {"n_restarts_optimizer"} | tunable_float_params | tunable_bounds_params:
+                raise ValueError(
+                    "Unknown GPR parameter "
+                    f"{name!r}; choose from {sorted({'n_restarts_optimizer'} | tunable_float_params | tunable_bounds_params)}"
+                )
+            try:
+                if name == "n_restarts_optimizer":
+                    restarts = int(value)
+                    if restarts < 0:
+                        raise ValueError
+                    model_params[name] = restarts
+                elif name in tunable_float_params:
+                    number = float(value)
+                    if not math.isfinite(number) or number <= 0:
+                        raise ValueError
+                    model_params[name] = number
+                else:
+                    bounds = tuple(float(part) for part in value.split(","))
+                    if len(bounds) != 2 or not all(math.isfinite(bound) and bound > 0 for bound in bounds):
+                        raise ValueError
+                    if bounds[0] >= bounds[1]:
+                        raise ValueError
+                    model_params[name] = bounds
+            except ValueError as exc:
+                expected = "an integer >= 0" if name == "n_restarts_optimizer" else (
+                    "a positive number" if name in tunable_float_params else "LOWER,UPPER positive bounds"
+                )
+                raise ValueError(f"Invalid value {value!r} for GPR parameter {name!r}; expected {expected}") from exc
+    model_params["kernel"] = (
+        f"ConstantKernel({model_params['constant_value']}, "
+        f"{model_params['constant_value_bounds']}) * "
+        f"RBF(length_scale={model_params['rbf_length_scale']}, "
+        f"length_scale_bounds={model_params['rbf_length_scale_bounds']}) + "
+        f"WhiteKernel(noise_level={model_params['white_noise_level']}, "
+        f"noise_level_bounds={model_params['white_noise_level_bounds']})"
+    )
     logger.info("Model parameters: %s", model_params)
 
     fold_results: list[dict[str, float | int | str]] = []
@@ -248,12 +302,24 @@ def main() -> None:
         x_train = scaler.fit_transform(train[selected_features])
         x_test = scaler.transform(test[selected_features])
         kernel = (
-            ConstantKernel(1.0, (1e-2, 1e2))
-            * RBF(length_scale=np.ones(len(selected_features)), length_scale_bounds=(1e-2, 1e2))
-            + WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-5, 1e-1))
+            ConstantKernel(
+                model_params["constant_value"],
+                model_params["constant_value_bounds"],
+            )
+            * RBF(
+                length_scale=np.full(len(selected_features), model_params["rbf_length_scale"]),
+                length_scale_bounds=model_params["rbf_length_scale_bounds"],
+            )
+            + WhiteKernel(
+                noise_level=model_params["white_noise_level"],
+                noise_level_bounds=model_params["white_noise_level_bounds"],
+            )
         )
         model = GaussianProcessRegressor(
-            kernel=kernel, n_restarts_optimizer=10, normalize_y=True, random_state=42
+            kernel=kernel,
+            n_restarts_optimizer=model_params["n_restarts_optimizer"],
+            normalize_y=model_params["normalize_y"],
+            random_state=model_params["random_state"],
         )
         model.fit(x_train, train[target].to_numpy())
         fitted_folds.append((fold, model, scaler, test[selected_features].copy()))

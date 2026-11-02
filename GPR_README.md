@@ -1,10 +1,8 @@
 # Gaussian Process 5-fold 데모
 
-이 문서는 `GaussianProcessRegressor` 기반 5-fold 교차 검증 스크립트의 실행 방법과 결과물을 설명합니다. feature 선택, 타겟 자동 선택, split 읽기, 지원 공간군 필터링은 LightGBM 데모와 같은 기준을 사용합니다.
+`GaussianProcessRegressor` 기반 5-fold 교차 검증을 실행합니다. 공통 입력과 feature/타겟 선택 규칙은 [README.md](README.md#모델별-실행-안내)를 참고하세요.
 
 ## 실행
-
-먼저 전체 데이터의 `features_all.csv`와 기존 `split_data_v1`의 `summary.json`, `fold_membership.csv`를 준비합니다. `--data-root`에는 feature CSV 생성에 사용한 CIF 루트를 지정합니다.
 
 ```bash
 .venv/bin/python scripts/train_gaussian_process_demo.py \
@@ -66,7 +64,7 @@ for name in ['parity_plot.png', 'uncertainty_ribbon.png', 'partial_dependence.pn
 
 이 스크립트는 CIF 자체를 다시 읽지 않고 feature CSV와 split 파일로 학습합니다. 따라서 CIF 루트에는 `source_cif` 경로와 split 상대 경로를 맞추는 목적으로 접근할 수 있어야 합니다. GPR 학습은 GPU를 사용하지 않으며, 계산량은 학습 행 수에 따라 크게 늘어날 수 있습니다. 실행 결과는 Drive의 `gaussian_process_output`에 남습니다.
 
-기본 feature는 LightGBM 데모와 같은 12개입니다. `--add-features`와 `--exclude-features`로 feature를 조정할 수 있으며, 타겟은 `106_`으로 시작하는 유일한 컬럼을 자동으로 선택합니다. 타겟이 여러 개거나 다른 타겟을 지정하려면 `--target`을 사용합니다.
+공통 feature 옵션을 이 모델에서 사용하는 예:
 
 ```bash
 .venv/bin/python scripts/train_gaussian_process_demo.py \
@@ -88,6 +86,15 @@ ConstantKernel(1.0, (1e-2, 1e2))
 ```
 
 모델 설정은 `n_restarts_optimizer=10`, `normalize_y=True`, `random_state=42`입니다. 각 fold에서 train/test R², test RMSE, 최적화된 커널(`model.kernel_`)을 로깅합니다. 테스트 예측은 평균과 표준편차를 반환하며, 실제 절대 오차와 예측 표준편차 사이의 Pearson 상관계수와 Spearman 순위 상관계수(ρ)를 계산합니다. 상관계수 계산에 필요한 표본이나 변동성이 부족하면 값은 `undefined`로 표시됩니다.
+
+`--tune PARAM=VALUE`로 최적화 재시작 횟수와 Constant/RBF/White 커널의 초기값 및 bounds를 조정할 수 있습니다. 기본값은 `n_restarts_optimizer=10`, `constant_value=1.0`, `constant_value_bounds=0.01,100`, `rbf_length_scale=1.0`, `rbf_length_scale_bounds=0.01,100`, `white_noise_level=0.001`, `white_noise_level_bounds=0.00001,0.1`입니다. 재시작 횟수는 0 이상의 정수, 커널 초기값과 bounds는 양수로 지정하며 bounds는 `LOWER,UPPER` 형식으로 하한이 상한보다 작아야 합니다.
+
+```bash
+.venv/bin/python scripts/train_gaussian_process_demo.py \
+  --tune n_restarts_optimizer=5 constant_value=2 constant_value_bounds=0.1,1000 rbf_length_scale=0.5 rbf_length_scale_bounds=0.001,50 white_noise_level=0.002 white_noise_level_bounds=0.000001,0.05
+```
+
+지정한 값은 모든 fold에 적용되며, 실행 설정과 `metrics.json`에 기록됩니다. 커널 값은 각 fold 학습에서 bounds 안에서 최적화됩니다. 재시작 횟수를 높이면 학습 시간이 늘어날 수 있습니다.
 
 5개 fold의 train R², test R², test RMSE는 평균과 표준편차로 요약합니다.
 

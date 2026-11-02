@@ -32,7 +32,9 @@ JSON은 선택 사항입니다. 제공하면 Wyckoff metadata 등을 사용합�
 
 ## 모델별 실행 안내
 
-LightGBM 학습, feature 선택, 파라미터, 결과 파일 및 그래프 안내는 [LIGHTGBM_README.md](LIGHTGBM_README.md)를 참고하세요. [GPR_README.md](GPR_README.md)와 [SVR_README.md](SVR_README.md)에는 각 모델별 실행 안내가 있습니다.
+모델 학습은 전체 데이터로 만든 `features_all.csv`와 `split_data_v1`의 `summary.json`, `fold_membership.csv`를 공통 입력으로 사용합니다. `--data-root`는 feature CSV 생성에 쓴 CIF 루트이며 split 경로 연결에 사용합니다. 모델별 실행 명령, 전용 파라미터와 결과물은 [LIGHTGBM_README.md](LIGHTGBM_README.md), [GPR_README.md](GPR_README.md), [SVR_README.md](SVR_README.md), [RANDOM_FOREST_README.md](RANDOM_FOREST_README.md)를 참고하세요.
+
+네 모델은 기본 feature 12개와 `106_`으로 시작하는 유일한 타겟 컬럼을 사용합니다. `--add-features COLUMN...`, `--exclude-features COLUMN...`, `--target COLUMN`은 공통 옵션이며 컬럼명은 CSV 헤더와 같아야 합니다. 선택한 입력 또는 타겟에 결측값이 있는 행과 지원하지 않는 공간군의 행은 학습에서 제외됩니다.
 
 ## Feature 구성
 

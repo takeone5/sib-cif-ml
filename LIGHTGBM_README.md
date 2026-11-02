@@ -4,7 +4,7 @@
 
 ## 실행
 
-전체 데이터로 `features_all.csv`를 만든 다음 기존 `split_data_v1`의 `summary.json`과 `fold_membership.csv`를 사용합니다. `--data-root`에는 feature CSV 생성에 사용한 CIF 루트를 지정합니다.
+공통 입력과 feature/타겟 선택 규칙은 [README.md](README.md#모델별-실행-안내)를 참고하세요. 아래 명령은 기본 5-fold 실행입니다.
 
 ```bash
 .venv/bin/python scripts/train_lightgbm_demo.py \
@@ -31,15 +31,6 @@
 114_is_2Layer
 ```
 
-`--add-features`와 `--exclude-features`로 feature를 조정할 수 있습니다. 컬럼명은 `features_all.csv` 헤더와 같아야 합니다. 타겟은 `106_`으로 시작하는 유일한 컬럼을 자동 선택하며, 직접 지정하려면 `--target COLUMN`을 사용합니다.
-
-```bash
-.venv/bin/python scripts/train_lightgbm_demo.py \
-  --exclude-features 002_TM_layer_entropy \
-  --add-features 001_example_feature 115_example_feature \
-  --target 106_O_Na_O_to_O_TM_O_ratio
-```
-
 ## 모델 설정
 
 기본 실행은 다음 파라미터를 사용합니다.
@@ -52,14 +43,7 @@ reg_lambda=3.0, reg_alpha=0.1, objective='regression', random_state=42
 
 모델은 기본적으로 위 파라미터를 모든 fold에 적용합니다. `--tune PARAM=VALUE`로 원하는 파라미터를 직접 덮어쓸 수 있으며, 지정하지 않은 값은 기본값을 유지합니다. 자동 탐색이나 inner CV는 수행하지 않습니다. 실제 학습에 사용되는 파라미터는 CLI와 `train.log`에 출력됩니다.
 
-```bash
-.venv/bin/python scripts/train_lightgbm_demo.py \
-  --features correlation_output/features_all.csv \
-  --data-root /path/to/cif_root \
-  --split-root split_data_v1 \
-  --tune n_estimators=300 learning_rate=0.03 num_leaves=15 \
-  -o ml_output/lightgbm_tuned
-```
+예: `--tune n_estimators=300 learning_rate=0.03 num_leaves=15 -o ml_output/lightgbm_tuned`를 위 실행 명령에 추가합니다.
 
 기본 파라미터 목록에 있는 항목은 모두 지정할 수 있습니다. 정수/실수 파라미터는 값에 맞춰 변환하고, `objective` 같은 문자열 파라미터는 문자열로 전달합니다.
 
